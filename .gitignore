@@ -1,0 +1,21 @@
+# Binaries
+*.exe
+bin/
+
+# Go sum files
+go.sum
+agent/go.sum
+
+# Node
+node_modules/
+web/dist/
+web/package-lock.json
+
+# Data
+data/
+*.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
