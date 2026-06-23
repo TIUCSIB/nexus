@@ -1,4 +1,4 @@
-﻿package main
+package main
 
 import (
 	"flag"
@@ -15,42 +15,37 @@ import (
 
 func main() {
 	configPath := flag.String("config", "config.yaml", "path to config file")
-	initAdmin := flag.Bool("init-admin", false, "create initial admin user (interactive)")
+	initAdminEmail := flag.String("admin-email", "", "create admin user with this email")
+	initAdminPass := flag.String("admin-pass", "", "admin password (use with -admin-email)")
 	flag.Parse()
 
-	// Load config
 	if err := config.Load(*configPath); err != nil {
-		log.Fatalf("加载配置文件失败: %v", err)
+		log.Fatalf("load config failed: %v", err)
 	}
 
-	// Init JWT
 	jwt.Init(config.Global.JWT.Secret)
 
-	// Init database
 	if err := database.Init(config.Global.Database); err != nil {
-		log.Fatalf("初始化数据库失败: %v", err)
+		log.Fatalf("init database failed: %v", err)
 	}
-	log.Println("数据库初始化完成")
+	log.Println("database ready")
 
-	// Create data directory
-	dir := filepath.Dir(config.Global.Database.DSN)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		log.Fatalf("创建数据目录失败: %v", err)
-	}
-
-	// Handle init-admin flag
-	if *initAdmin {
-		if err := database.CreateInitialAdmin(); err != nil {
-			log.Fatalf("创建管理员失败: %v", err)
+	if *initAdminEmail != "" && *initAdminPass != "" {
+		if err := database.CreateAdminByEmail(*initAdminEmail, *initAdminPass); err != nil {
+			log.Fatalf("create admin failed: %v", err)
 		}
 		return
 	}
 
-	// Start HTTP server
+	dir := filepath.Dir(config.Global.Database.DSN)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		log.Fatalf("create data dir failed: %v", err)
+	}
+
 	r := router.Setup()
 	addr := fmt.Sprintf("%s:%d", config.Global.Server.Host, config.Global.Server.Port)
-	log.Printf("Nexus Panel 启动在 %s", addr)
+	log.Printf("Nexus Panel started at %s", addr)
 	if err := r.Run(addr); err != nil {
-		log.Fatalf("启动服务器失败: %v", err)
+		log.Fatalf("start server failed: %v", err)
 	}
 }

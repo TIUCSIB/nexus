@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -20,6 +21,11 @@ import (
 var DB *gorm.DB
 
 func Init(cfg config.DatabaseConfig) error {
+	dir := filepath.Dir(cfg.DSN)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("create data directory: %w", err)
+	}
+
 	var err error
 	logLevel := logger.Warn
 	if config.Global.App.Debug {
@@ -83,5 +89,32 @@ func CreateInitialAdmin() error {
 
 	_ = time.Now()
 	fmt.Printf("管理员账号 %s 创建成功\n", email)
+	return nil
+}
+func CreateAdminByEmail(email, password string) error {
+	hash, err := crypto.HashPassword(password)
+	if err != nil {
+		return err
+	}
+
+	admin := model.User{
+		UUID:         uuid.New().String(),
+		Email:        email,
+		PasswordHash: hash,
+		IsAdmin:      true,
+		Token:        uuid.New().String(),
+		Status:       1,
+		TrafficLimit: 0,
+	}
+
+	result := DB.Where("email = ?", email).FirstOrCreate(&admin)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		fmt.Printf("admin %s already exists\n", email)
+	} else {
+		fmt.Printf("admin %s created successfully\n", email)
+	}
 	return nil
 }
