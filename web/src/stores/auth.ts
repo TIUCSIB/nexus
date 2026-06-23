@@ -1,27 +1,29 @@
 ﻿import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { login as loginApi } from '@/api/auth'
-import type { User } from '@/types'
-import router from '@/router'
 
 export const useAuthStore = defineStore('auth', () => {
-  const token = ref<string>(localStorage.getItem('token') || '')
-  const user = ref<User | null>(null)
+  const token = ref(localStorage.getItem('token') || '')
+  const email = ref(localStorage.getItem('email') || '')
 
-  async function login(email: string, password: string) {
-    const res = await loginApi(email, password)
-    token.value = res.data.token
-    user.value = res.data.user
-    localStorage.setItem('token', res.data.token)
-    router.push('/dashboard')
+  async function login(emailAddr: string, password: string) {
+    const res = await loginApi({ email: emailAddr, password })
+    if (res.code === 0) {
+      token.value = res.data.token
+      email.value = emailAddr
+      localStorage.setItem('token', res.data.token)
+      localStorage.setItem('email', emailAddr)
+      return true
+    }
+    return false
   }
 
   function logout() {
     token.value = ''
-    user.value = null
+    email.value = ''
     localStorage.removeItem('token')
-    router.push('/login')
+    localStorage.removeItem('email')
   }
 
-  return { token, user, login, logout }
+  return { token, email, login, logout }
 })

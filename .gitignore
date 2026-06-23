@@ -10,7 +10,7 @@ agent/go.sum
 node_modules/
 web/dist/
 web/package-lock.json
-
+web/node_modules/
 # Data
 data/
 *.db

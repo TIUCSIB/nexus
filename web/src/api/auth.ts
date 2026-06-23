@@ -1,10 +1,8 @@
 ﻿import request from '@/utils/request'
-import type { ApiResponse, LoginResponse } from '@/types'
+import type { ApiResponse } from '@/types'
 
-export function login(email: string, password: string) {
-  return request.post<any, ApiResponse<LoginResponse>>('/auth/login', { email, password })
-}
+export const login = (data: { email: string; password: string }) =>
+  request.post('/auth/login', data) as Promise<ApiResponse>
 
-export function refreshToken(token: string) {
-  return request.post<any, ApiResponse<LoginResponse>>('/auth/refresh', { token })
-}
+export const refreshToken = (data: { refresh_token: string }) =>
+  request.post('/auth/refresh', data) as Promise<ApiResponse>

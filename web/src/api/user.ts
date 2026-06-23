@@ -1,22 +1,17 @@
 ﻿import request from '@/utils/request'
 import type { ApiResponse, PageResult, User } from '@/types'
 
-export function listUsers(params?: { page?: number; page_size?: number; keyword?: string; status?: string }) {
-  return request.get<any, ApiResponse<PageResult<User>>>('/users', { params })
-}
+export const listUsers = (params: { page?: number; page_size?: number; q?: string }) =>
+  request.get('/admin/users', { params }) as Promise<ApiResponse<PageResult<User>>>
 
-export function getUser(id: number) {
-  return request.get<any, ApiResponse<User>>(`/users/${id}`)
-}
+export const getUser = (id: number) =>
+  request.get(`/admin/users/${id}`) as Promise<ApiResponse<User>>
 
-export function createUser(data: Partial<User> & { password?: string }) {
-  return request.post<any, ApiResponse<User>>('/users', data)
-}
+export const createUser = (data: Partial<User> & { password: string }) =>
+  request.post('/admin/users', data) as Promise<ApiResponse>
 
-export function updateUser(id: number, data: Partial<User> & { password?: string }) {
-  return request.put<any, ApiResponse<User>>(`/users/${id}`, data)
-}
+export const updateUser = (id: number, data: Partial<User>) =>
+  request.put(`/admin/users/${id}`, data) as Promise<ApiResponse>
 
-export function deleteUser(id: number) {
-  return request.delete<any, ApiResponse<null>>(`/users/${id}`)
-}
+export const deleteUser = (id: number) =>
+  request.delete(`/admin/users/${id}`) as Promise<ApiResponse>

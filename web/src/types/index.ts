@@ -1,13 +1,18 @@
 ﻿export interface User {
   id: number
-  email: string
   uuid: string
+  email: string
+  balance: number
   plan_id: number | null
-  plan_name?: string
   traffic_used: number
   traffic_limit: number
-  status: 'active' | 'disabled' | 'expired'
-  expire_at: string | null
+  expired_at: string | null
+  is_admin: boolean
+  token: string
+  status: number
+  device_limit: number
+  speed_limit_up: number
+  speed_limit_down: number
   created_at: string
   updated_at: string
 }
@@ -15,79 +20,41 @@
 export interface Plan {
   id: number
   name: string
+  description: string
   traffic_limit: number
   duration_days: number
   price: number
-  description: string
-  node_ids: number[]
+  sort: number
+  status: number
   created_at: string
-  updated_at: string
 }
 
 export interface Node {
   id: number
   name: string
   address: string
+  protocol: string
   port: number
-  protocol: 'vmess' | 'vless' | 'trojan' | 'shadowsocks'
-  status: 'online' | 'offline' | 'maintenance'
   config_mode: string
-  traffic_rate: number
-  sort_order: number
+  config_json: string
+  online: boolean
+  last_heartbeat: string | null
+  sort: number
+  status: number
   created_at: string
   updated_at: string
 }
 
-export interface TrafficLog {
-  id: number
-  user_id: number
-  node_id: number
-  upload: number
-  download: number
-  recorded_at: string
-}
-
 export interface PageResult<T> {
-  list: T[]
+  items: T[]
   total: number
   page: number
   page_size: number
+  total_pages: number
 }
 
 export interface ApiResponse<T = any> {
   code: number
   message: string
   data: T
-}
-
-export interface LoginResponse {
-  token: string
-  user: User
-}
-
-export interface OverviewStats {
-  total_users: number
-  active_users: number
-  total_traffic: number
-  total_nodes: number
-  online_nodes: number
-  today_income: number
-  month_income: number
-}
-
-export interface TrafficStats {
-  date: string
-  upload: number
-  download: number
-}
-
-export interface SystemSettings {
-  site_name: string
-  site_url: string
-  admin_email: string
-  register_enabled: boolean
-  default_traffic_limit: number
-  default_plan_id: number | null
-  jwt_secret: string
-  invite_only: boolean
 }

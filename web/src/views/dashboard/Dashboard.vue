@@ -1,215 +1,74 @@
-ï»¿<template>
-  <div class="dashboard">
-    <el-row :gutter="20" class="stat-cards">
-      <el-col :span="6">
-        <el-card shadow="hover" class="stat-card">
-          <div class="stat-content">
-            <div class="stat-info">
-              <div class="stat-label">æ€»ç”¨æˆ·æ•°</div>
-              <div class="stat-value">{{ stats.total_users }}</div>
-            </div>
-            <el-icon class="stat-icon" style="color: #409eff"><User /></el-icon>
-          </div>
-        </el-card>
-      </el-col>
-      <el-col :span="6">
-        <el-card shadow="hover" class="stat-card">
-          <div class="stat-content">
-            <div class="stat-info">
-              <div class="stat-label">æ´»è·ƒç”¨æˆ·</div>
-              <div class="stat-value">{{ stats.active_users }}</div>
-            </div>
-            <el-icon class="stat-icon" style="color: #67c23a"><UserFilled /></el-icon>
-          </div>
-        </el-card>
-      </el-col>
-      <el-col :span="6">
-        <el-card shadow="hover" class="stat-card">
-          <div class="stat-content">
-            <div class="stat-info">
-              <div class="stat-label">åœ¨çº¿èŠ‚ç‚¹</div>
-              <div class="stat-value">{{ stats.online_nodes }} / {{ stats.total_nodes }}</div>
-            </div>
-            <el-icon class="stat-icon" style="color: #e6a23c"><Connection /></el-icon>
-          </div>
-        </el-card>
-      </el-col>
-      <el-col :span="6">
-        <el-card shadow="hover" class="stat-card">
-          <div class="stat-content">
-            <div class="stat-info">
-              <div class="stat-label">ä»Šæ—¥æ”¶å…¥</div>
-              <div class="stat-value">&yen;{{ stats.today_income.toFixed(2) }}</div>
-            </div>
-            <el-icon class="stat-icon" style="color: #f56c6c"><Wallet /></el-icon>
-          </div>
-        </el-card>
-      </el-col>
-    </el-row>
-
-    <el-row :gutter="20" style="margin-top: 20px">
-      <el-col :span="16">
-        <el-card shadow="hover">
-          <template #header>
-            <div class="card-header">
-              <span>æµé‡è¶‹åŠ¿ï¼ˆè¿‘7å¤©ï¼‰</span>
-            </div>
-          </template>
-          <div class="traffic-placeholder">
-            <el-empty v-if="trafficData.length === 0" description="æš‚æ— æµé‡æ•°æ®" />
-            <div v-else class="traffic-list">
-              <div v-for="item in trafficData" :key="item.date" class="traffic-item">
-                <span class="traffic-date">{{ item.date }}</span>
-                <span class="traffic-value">{{ formatTraffic(item.upload + item.download) }}</span>
-              </div>
-            </div>
-          </div>
-        </el-card>
-      </el-col>
-      <el-col :span="8">
-        <el-card shadow="hover">
-          <template #header>
-            <div class="card-header">
-              <span>æœ¬æœˆæ¦‚è§ˆ</span>
-            </div>
-          </template>
-          <div class="overview-list">
-            <div class="overview-item">
-              <span>æœ¬æœˆæ”¶å…¥</span>
-              <span class="overview-value">&yen;{{ stats.month_income.toFixed(2) }}</span>
-            </div>
-            <div class="overview-item">
-              <span>æ€»æµé‡ä½¿ç”¨</span>
-              <span class="overview-value">{{ formatTraffic(stats.total_traffic) }}</span>
-            </div>
-            <div class="overview-item">
-              <span>èŠ‚ç‚¹åœ¨çº¿ç‡</span>
-              <span class="overview-value">{{ nodeOnlineRate }}%</span>
-            </div>
-          </div>
-        </el-card>
-      </el-col>
-    </el-row>
-  </div>
-</template>
-
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
-import { getOverview, getTraffic } from '@/api/stats'
-import type { TrafficStats } from '@/types'
+import { ref, onMounted } from 'vue'
+import { getOverview } from '@/api/stats'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Users, Server, Wifi, Activity } from '@lucide/vue'
 
-const stats = reactive({
+const overview = ref({
   total_users: 0,
-  active_users: 0,
-  total_traffic: 0,
   total_nodes: 0,
   online_nodes: 0,
-  today_income: 0,
-  month_income: 0
+  total_traffic: 0,
 })
-
-const trafficData = ref<TrafficStats[]>([])
-
-const nodeOnlineRate = computed(() => {
-  if (stats.total_nodes === 0) return 0
-  return ((stats.online_nodes / stats.total_nodes) * 100).toFixed(1)
-})
+const loading = ref(true)
 
 function formatTraffic(bytes: number): string {
-  if (bytes === 0) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  const i = Math.floor(Math.log(bytes) / Math.log(1024))
-  return (bytes / Math.pow(1024, i)).toFixed(2) + ' ' + units[i]
+  if (bytes >= 1073741824) {
+    return (bytes / 1073741824).toFixed(2) + ' GB'
+  }
+  if (bytes >= 1048576) {
+    return (bytes / 1048576).toFixed(2) + ' MB'
+  }
+  return bytes + ' B'
 }
 
 onMounted(async () => {
   try {
     const res = await getOverview()
-    Object.assign(stats, res.data)
-  } catch {
-    // ignore
-  }
-  try {
-    const res = await getTraffic(7)
-    trafficData.value = res.data
-  } catch {
-    // ignore
+    if (res.code === 0 && res.data) {
+      overview.value = res.data
+    }
+  } catch (err) {
+    console.error('»ñÈ¡¸ÅÀÀÊı¾İÊ§°Ü:', err)
+  } finally {
+    loading.value = false
   }
 })
+
+const statCards = [
+  { title: '×ÜÓÃ»§Êı', key: 'total_users' as const, icon: Users, color: 'text-blue-500' },
+  { title: '×Ü½ÚµãÊı', key: 'total_nodes' as const, icon: Server, color: 'text-green-500' },
+  { title: 'ÔÚÏß½Úµã', key: 'online_nodes' as const, icon: Wifi, color: 'text-emerald-500' },
+  { title: '×ÜÁ÷Á¿', key: 'total_traffic' as const, icon: Activity, color: 'text-orange-500', format: true },
+]
 </script>
 
-<style scoped>
-.stat-card .stat-content {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
+<template>
+  <div class="space-y-6">
+    <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <Card v-for="card in statCards" :key="card.key">
+        <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
+          <CardTitle class="text-sm font-medium">{{ card.title }}</CardTitle>
+          <component :is="card.icon" :class="['size-4 text-muted-foreground', card.color]" />
+        </CardHeader>
+        <CardContent>
+          <div v-if="loading" class="h-8 w-20 animate-pulse rounded bg-muted" />
+          <div v-else class="text-2xl font-bold">
+            {{ card.format ? formatTraffic(overview[card.key]) : overview[card.key] }}
+          </div>
+        </CardContent>
+      </Card>
+    </div>
 
-.stat-label {
-  font-size: 14px;
-  color: #909399;
-  margin-bottom: 8px;
-}
-
-.stat-value {
-  font-size: 24px;
-  font-weight: 600;
-  color: #303133;
-}
-
-.stat-icon {
-  font-size: 48px;
-  opacity: 0.3;
-}
-
-.card-header {
-  font-weight: 600;
-  color: #303133;
-}
-
-.traffic-placeholder {
-  min-height: 300px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.traffic-list {
-  width: 100%;
-}
-
-.traffic-item {
-  display: flex;
-  justify-content: space-between;
-  padding: 10px 0;
-  border-bottom: 1px solid #f0f0f0;
-}
-
-.traffic-date {
-  color: #606266;
-}
-
-.traffic-value {
-  font-weight: 600;
-  color: #303133;
-}
-
-.overview-list {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
-
-.overview-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 10px 0;
-  border-bottom: 1px solid #f0f0f0;
-}
-
-.overview-value {
-  font-weight: 600;
-  color: #409eff;
-}
-</style>
+    <Card>
+      <CardHeader>
+        <CardTitle>Á÷Á¿Í³¼Æ</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div class="flex h-64 items-center justify-center text-muted-foreground">
+          Á÷Á¿Í³¼ÆÍ¼±í¿ª·¢ÖĞ...
+        </div>
+      </CardContent>
+    </Card>
+  </div>
+</template>

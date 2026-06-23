@@ -1,126 +1,123 @@
-ï»¿<template>
-  <div class="settings-page">
-    <el-card shadow="never">
-      <template #header>
-        <div class="card-header">
-          <span>ç³»ç»Ÿè®¾ç½®</span>
-        </div>
-      </template>
-      <el-form
-        ref="formRef"
-        :model="form"
-        label-width="140px"
-        v-loading="loading"
-        style="max-width: 640px"
-      >
-        <el-divider content-position="left">åŸºæœ¬è®¾ç½®</el-divider>
-        <el-form-item label="ç«™ç‚¹åç§°" prop="site_name">
-          <el-input v-model="form.site_name" placeholder="Nexus Proxy" />
-        </el-form-item>
-        <el-form-item label="ç«™ç‚¹URL" prop="site_url">
-          <el-input v-model="form.site_url" placeholder="https://example.com" />
-        </el-form-item>
-        <el-form-item label="ç®¡ç†å‘˜é‚®ç®±" prop="admin_email">
-          <el-input v-model="form.admin_email" placeholder="admin@example.com" />
-        </el-form-item>
-
-        <el-divider content-position="left">æ³¨å†Œè®¾ç½®</el-divider>
-        <el-form-item label="å¼€æ”¾æ³¨å†Œ" prop="register_enabled">
-          <el-switch v-model="form.register_enabled" active-text="å¼€å¯" inactive-text="å…³é—­" />
-        </el-form-item>
-        <el-form-item label="ä»…é‚€è¯·æ³¨å†Œ" prop="invite_only">
-          <el-switch v-model="form.invite_only" active-text="æ˜¯" inactive-text="å¦" />
-        </el-form-item>
-
-        <el-divider content-position="left">é»˜è®¤ç”¨æˆ·é…ç½®</el-divider>
-        <el-form-item label="é»˜è®¤æµé‡é™åˆ¶(å­—èŠ‚)" prop="default_traffic_limit">
-          <el-input-number v-model="form.default_traffic_limit" :min="0" :step="1073741824" style="width: 100%" />
-        </el-form-item>
-        <el-form-item label="é»˜è®¤å¥—é¤" prop="default_plan_id">
-          <el-select v-model="form.default_plan_id" placeholder="æ— " clearable style="width: 100%">
-            <el-option v-for="p in plans" :key="p.id" :label="p.name" :value="p.id" />
-          </el-select>
-        </el-form-item>
-
-        <el-divider content-position="left">å®‰å…¨è®¾ç½®</el-divider>
-        <el-form-item label="JWTå¯†é’¥" prop="jwt_secret">
-          <el-input v-model="form.jwt_secret" type="password" show-password placeholder="JWT Secret Key" />
-        </el-form-item>
-
-        <el-form-item>
-          <el-button type="primary" :loading="saving" @click="handleSave">ä¿å­˜è®¾ç½®</el-button>
-        </el-form-item>
-      </el-form>
-    </el-card>
-  </div>
-</template>
-
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
-import type { FormInstance } from 'element-plus'
-import { ElMessage } from 'element-plus'
+import { ref, onMounted } from 'vue'
 import { getSettings, updateSettings } from '@/api/settings'
-import { listPlans } from '@/api/plan'
-import type { Plan } from '@/types'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Separator } from '@/components/ui/separator'
+import { Save, Loader2 } from '@lucide/vue'
 
-const formRef = ref<FormInstance>()
-const loading = ref(false)
+const settings = ref<Record<string, string>>({})
+const loading = ref(true)
 const saving = ref(false)
-const plans = ref<Plan[]>([])
 
-const form = reactive({
-  site_name: '',
-  site_url: '',
-  admin_email: '',
-  register_enabled: true,
-  invite_only: false,
-  default_traffic_limit: 10737418240,
-  default_plan_id: null as number | null,
-  jwt_secret: ''
-})
+const settingGroups = [
+  {
+    title: 'Õ¾µãÉèÖÃ',
+    description: 'ÅäÖÃÕ¾µã»ù±¾ĞÅÏ¢',
+    fields: [
+      { key: 'site_name', label: 'Õ¾µãÃû³Æ', placeholder: 'Nexus' },
+      { key: 'site_description', label: 'Õ¾µãÃèÊö', placeholder: 'Nexus ¹ÜÀíÏµÍ³' },
+      { key: 'site_url', label: 'Õ¾µã URL', placeholder: 'https://example.com' },
+    ],
+  },
+  {
+    title: 'ÓÊ¼şÉèÖÃ',
+    description: 'ÅäÖÃ SMTP ÓÊ¼ş·şÎñ',
+    fields: [
+      { key: 'smtp_host', label: 'SMTP Ö÷»ú', placeholder: 'smtp.example.com' },
+      { key: 'smtp_port', label: 'SMTP ¶Ë¿Ú', placeholder: '587' },
+      { key: 'smtp_user', label: 'SMTP ÓÃ»§Ãû', placeholder: 'user@example.com' },
+      { key: 'smtp_password', label: 'SMTP ÃÜÂë', placeholder: '??????', type: 'password' },
+      { key: 'smtp_from', label: '·¢¼şÈËµØÖ·', placeholder: 'noreply@example.com' },
+    ],
+  },
+  {
+    title: '¶©ÔÄÉèÖÃ',
+    description: 'ÅäÖÃÓÃ»§¶©ÔÄÏà¹Ø²ÎÊı',
+    fields: [
+      { key: 'subscribe_path', label: '¶©ÔÄÂ·¾¶', placeholder: '/api/v1/subscribe' },
+      { key: 'default_traffic_limit', label: 'Ä¬ÈÏÁ÷Á¿ÏŞÖÆ (×Ö½Ú)', placeholder: '10737418240' },
+      { key: 'default_device_limit', label: 'Ä¬ÈÏÉè±¸ÏŞÖÆ', placeholder: '3' },
+    ],
+  },
+]
 
-async function loadSettings() {
+async function fetchSettings() {
   loading.value = true
   try {
     const res = await getSettings()
-    Object.assign(form, res.data)
-  } catch {
-    // handled by interceptor
+    if (res.code === 0 && res.data) {
+      settings.value = res.data
+    }
+  } catch (err) {
+    console.error('»ñÈ¡ÉèÖÃÊ§°Ü:', err)
   } finally {
     loading.value = false
-  }
-}
-
-async function loadPlans() {
-  try {
-    const res = await listPlans({ page: 1, page_size: 100 })
-    plans.value = res.data.list || []
-  } catch {
-    // ignore
   }
 }
 
 async function handleSave() {
   saving.value = true
   try {
-    await updateSettings(form)
-    ElMessage.success('è®¾ç½®ä¿å­˜æˆåŠŸ')
-  } catch {
-    // handled by interceptor
+    await updateSettings(settings.value)
+  } catch (err) {
+    console.error('±£´æÉèÖÃÊ§°Ü:', err)
   } finally {
     saving.value = false
   }
 }
 
-onMounted(() => {
-  loadSettings()
-  loadPlans()
-})
+onMounted(fetchSettings)
 </script>
 
-<style scoped>
-.card-header {
-  font-weight: 600;
-  font-size: 16px;
-}
-</style>
+<template>
+  <div class="space-y-6">
+    <div class="flex items-center justify-between">
+      <div>
+        <h2 class="text-lg font-semibold">ÏµÍ³ÉèÖÃ</h2>
+        <p class="text-sm text-muted-foreground">¹ÜÀíÄúµÄÏµÍ³ÅäÖÃ</p>
+      </div>
+      <Button :disabled="saving || loading" @click="handleSave">
+        <Loader2 v-if="saving" class="size-4 animate-spin" />
+        <Save v-else class="size-4" />
+        {{ saving ? '±£´æÖĞ...' : '±£´æÉèÖÃ' }}
+      </Button>
+    </div>
+
+    <template v-if="loading">
+      <Card v-for="i in 3" :key="i">
+        <CardContent class="p-6">
+          <div class="space-y-4">
+            <div class="h-4 w-32 animate-pulse rounded bg-muted" />
+            <div class="h-4 w-48 animate-pulse rounded bg-muted" />
+            <div class="h-8 w-full animate-pulse rounded bg-muted" />
+          </div>
+        </CardContent>
+      </Card>
+    </template>
+
+    <template v-else>
+      <Card v-for="group in settingGroups" :key="group.title">
+        <CardHeader>
+          <CardTitle>{{ group.title }}</CardTitle>
+          <CardDescription>{{ group.description }}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div class="grid gap-4">
+            <div v-for="field in group.fields" :key="field.key" class="grid gap-2">
+              <Label :for="field.key">{{ field.label }}</Label>
+              <Input
+                :id="field.key"
+                v-model="settings[field.key]"
+                :type="field.type || 'text'"
+                :placeholder="field.placeholder"
+              />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    </template>
+  </div>
+</template>

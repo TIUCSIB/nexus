@@ -1,280 +1,387 @@
-ï»¿<template>
-  <div class="users-page">
-    <el-card shadow="never">
-      <div class="toolbar">
-        <div class="toolbar-left">
-          <el-input
-            v-model="searchKeyword"
-            placeholder="æœç´¢é‚®ç®±æˆ–UUID"
-            style="width: 240px"
-            clearable
-            @clear="loadUsers"
-            @keyup.enter="loadUsers"
-          >
-            <template #prefix>
-              <el-icon><Search /></el-icon>
-            </template>
-          </el-input>
-          <el-select v-model="searchStatus" placeholder="çŠ¶æ€ç­›é€‰" clearable style="width: 140px; margin-left: 10px" @change="loadUsers">
-            <el-option label="æ­£å¸¸" value="active" />
-            <el-option label="ç¦ç”¨" value="disabled" />
-            <el-option label="è¿‡æœŸ" value="expired" />
-          </el-select>
-          <el-button type="primary" style="margin-left: 10px" @click="loadUsers">æœç´¢</el-button>
-        </div>
-        <el-button type="success" @click="openDialog('create')">æ·»åŠ ç”¨æˆ·</el-button>
-      </div>
-
-      <el-table :data="users" v-loading="loading" stripe style="margin-top: 16px">
-        <el-table-column prop="id" label="ID" width="70" />
-        <el-table-column prop="email" label="é‚®ç®±" min-width="180" />
-        <el-table-column prop="uuid" label="UUID" min-width="200" show-overflow-tooltip />
-        <el-table-column label="æµé‡" min-width="160">
-          <template #default="{ row }">
-            <span>{{ formatTraffic(row.traffic_used) }} / {{ formatTraffic(row.traffic_limit) }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="çŠ¶æ€" width="90">
-          <template #default="{ row }">
-            <el-tag :type="statusTagType(row.status)">{{ statusLabel(row.status) }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="åˆ°æœŸæ—¶é—´" width="170">
-          <template #default="{ row }">
-            {{ row.expire_at ? formatDate(row.expire_at) : 'æ°¸ä¸è¿‡æœŸ' }}
-          </template>
-        </el-table-column>
-        <el-table-column label="æ“ä½œ" width="160" fixed="right">
-          <template #default="{ row }">
-            <el-button link type="primary" @click="openDialog('edit', row)">ç¼–è¾‘</el-button>
-            <el-button link type="danger" @click="handleDelete(row)">åˆ é™¤</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-
-      <div class="pagination-wrapper">
-        <el-pagination
-          v-model:current-page="page"
-          v-model:page-size="pageSize"
-          :total="total"
-          :page-sizes="[10, 20, 50, 100]"
-          layout="total, sizes, prev, pager, next, jumper"
-          @size-change="loadUsers"
-          @current-change="loadUsers"
-        />
-      </div>
-    </el-card>
-
-    <el-dialog
-      v-model="dialogVisible"
-      :title="dialogMode === 'create' ? 'æ·»åŠ ç”¨æˆ·' : 'ç¼–è¾‘ç”¨æˆ·'"
-      width="560px"
-      destroy-on-close
-    >
-      <el-form ref="formRef" :model="form" :rules="formRules" label-width="100px">
-        <el-form-item label="é‚®ç®±" prop="email">
-          <el-input v-model="form.email" placeholder="è¯·è¾“å…¥é‚®ç®±" />
-        </el-form-item>
-        <el-form-item label="å¯†ç " :prop="dialogMode === 'create' ? 'password' : ''">
-          <el-input v-model="form.password" type="password" :placeholder="dialogMode === 'edit' ? 'ç•™ç©ºåˆ™ä¸ä¿®æ”¹' : 'è¯·è¾“å…¥å¯†ç '" show-password />
-        </el-form-item>
-        <el-form-item label="å¥—é¤" prop="plan_id">
-          <el-select v-model="form.plan_id" placeholder="é€‰æ‹©å¥—é¤" clearable style="width: 100%">
-            <el-option v-for="p in plans" :key="p.id" :label="p.name" :value="p.id" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="æµé‡é™åˆ¶(å­—èŠ‚)" prop="traffic_limit">
-          <el-input-number v-model="form.traffic_limit" :min="0" :step="1073741824" style="width: 100%" />
-        </el-form-item>
-        <el-form-item label="çŠ¶æ€" prop="status">
-          <el-select v-model="form.status" style="width: 100%">
-            <el-option label="æ­£å¸¸" value="active" />
-            <el-option label="ç¦ç”¨" value="disabled" />
-            <el-option label="è¿‡æœŸ" value="expired" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="åˆ°æœŸæ—¶é—´" prop="expire_at">
-          <el-date-picker v-model="form.expire_at" type="datetime" placeholder="é€‰æ‹©åˆ°æœŸæ—¶é—´" style="width: 100%" value-format="YYYY-MM-DDTHH:mm:ssZ" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="dialogVisible = false">å–æ¶ˆ</el-button>
-        <el-button type="primary" :loading="submitting" @click="handleSubmit">ç¡®å®š</el-button>
-      </template>
-    </el-dialog>
-  </div>
-</template>
-
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
-import type { FormInstance, FormRules } from 'element-plus'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ref, onMounted, computed } from 'vue'
 import { listUsers, createUser, updateUser, deleteUser } from '@/api/user'
-import { listPlans } from '@/api/plan'
-import type { User, Plan } from '@/types'
+import type { User } from '@/types'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Badge } from '@/components/ui/badge'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import {
+  Pagination,
+  PaginationContent,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from '@/components/ui/pagination'
+import { Plus, Search, MoreHorizontal, Pencil, Trash2 } from '@lucide/vue'
 
 const users = ref<User[]>([])
-const plans = ref<Plan[]>([])
-const loading = ref(false)
-const submitting = ref(false)
+const total = ref(0)
 const page = ref(1)
 const pageSize = ref(20)
-const total = ref(0)
-const searchKeyword = ref('')
-const searchStatus = ref('')
-const dialogVisible = ref(false)
-const dialogMode = ref<'create' | 'edit'>('create')
-const editingId = ref(0)
-const formRef = ref<FormInstance>()
+const searchQuery = ref('')
+const loading = ref(false)
 
-const form = reactive({
+const showDialog = ref(false)
+const showDeleteDialog = ref(false)
+const editingUser = ref<User | null>(null)
+const deletingUser = ref<User | null>(null)
+const saving = ref(false)
+
+const form = ref({
   email: '',
   password: '',
-  plan_id: null as number | null,
-  traffic_limit: 10737418240,
-  status: 'active' as 'active' | 'disabled' | 'expired',
-  expire_at: ''
+  traffic_limit: 0,
+  speed_limit_up: 0,
+  speed_limit_down: 0,
+  device_limit: 0,
+  expired_at: '',
+  status: 1,
 })
 
-const formRules: FormRules = {
-  email: [
-    { required: true, message: 'è¯·è¾“å…¥é‚®ç®±', trigger: 'blur' },
-    { type: 'email', message: 'è¯·è¾“å…¥æ­£ç¡®çš„é‚®ç®±æ ¼å¼', trigger: 'blur' }
-  ],
-  password: [
-    { required: true, message: 'è¯·è¾“å…¥å¯†ç ', trigger: 'blur' },
-    { min: 6, message: 'å¯†ç é•¿åº¦ä¸èƒ½å°‘äº6ä½', trigger: 'blur' }
-  ]
-}
+const totalPages = computed(() => Math.ceil(total.value / pageSize.value))
 
 function formatTraffic(bytes: number): string {
-  if (!bytes || bytes === 0) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  const i = Math.floor(Math.log(bytes) / Math.log(1024))
-  return (bytes / Math.pow(1024, i)).toFixed(2) + ' ' + units[i]
+  if (bytes >= 1073741824) {
+    return (bytes / 1073741824).toFixed(2) + ' GB'
+  }
+  if (bytes >= 1048576) {
+    return (bytes / 1048576).toFixed(2) + ' MB'
+  }
+  if (bytes === 0) return '0 B'
+  return bytes + ' B'
 }
 
-function formatDate(dateStr: string): string {
-  return new Date(dateStr).toLocaleString('zh-CN')
+function formatDate(dateStr: string | null): string {
+  if (!dateStr) return 'ÓÀ¾Ã'
+  return new Date(dateStr).toLocaleDateString('zh-CN')
 }
 
-function statusTagType(status: string) {
-  const map: Record<string, string> = { active: 'success', disabled: 'danger', expired: 'warning' }
-  return (map[status] || 'info') as any
-}
-
-function statusLabel(status: string) {
-  const map: Record<string, string> = { active: 'æ­£å¸¸', disabled: 'ç¦ç”¨', expired: 'è¿‡æœŸ' }
-  return map[status] || status
-}
-
-async function loadUsers() {
+async function fetchUsers() {
   loading.value = true
   try {
-    const res = await listUsers({ page: page.value, page_size: pageSize.value, keyword: searchKeyword.value, status: searchStatus.value || undefined })
-    users.value = res.data.list || []
-    total.value = res.data.total || 0
-  } catch {
-    // handled by interceptor
+    const res = await listUsers({ page: page.value, page_size: pageSize.value, q: searchQuery.value || undefined })
+    if (res.code === 0 && res.data) {
+      users.value = res.data.items
+      total.value = res.data.total
+    }
+  } catch (err) {
+    console.error('»ñÈ¡ÓÃ»§ÁĞ±íÊ§°Ü:', err)
   } finally {
     loading.value = false
   }
 }
 
-async function loadPlans() {
-  try {
-    const res = await listPlans({ page: 1, page_size: 100 })
-    plans.value = res.data.list || []
-  } catch {
-    // ignore
+function openCreate() {
+  editingUser.value = null
+  form.value = {
+    email: '',
+    password: '',
+    traffic_limit: 0,
+    speed_limit_up: 0,
+    speed_limit_down: 0,
+    device_limit: 0,
+    expired_at: '',
+    status: 1,
   }
+  showDialog.value = true
 }
 
-function openDialog(mode: 'create' | 'edit', row?: User) {
-  dialogMode.value = mode
-  dialogVisible.value = true
-  if (mode === 'edit' && row) {
-    editingId.value = row.id
-    form.email = row.email
-    form.password = ''
-    form.plan_id = row.plan_id
-    form.traffic_limit = row.traffic_limit
-    form.status = row.status
-    form.expire_at = row.expire_at || ''
-  } else {
-    editingId.value = 0
-    form.email = ''
-    form.password = ''
-    form.plan_id = null
-    form.traffic_limit = 10737418240
-    form.status = 'active'
-    form.expire_at = ''
+function openEdit(user: User) {
+  editingUser.value = user
+  form.value = {
+    email: user.email,
+    password: '',
+    traffic_limit: user.traffic_limit,
+    speed_limit_up: user.speed_limit_up,
+    speed_limit_down: user.speed_limit_down,
+    device_limit: user.device_limit,
+    expired_at: user.expired_at ? user.expired_at.slice(0, 10) : '',
+    status: user.status,
   }
+  showDialog.value = true
 }
 
-async function handleSubmit() {
-  if (!formRef.value) return
-  const valid = await formRef.value.validate().catch(() => false)
-  if (!valid) return
-
-  submitting.value = true
+async function handleSave() {
+  saving.value = true
   try {
-    const data: any = { ...form }
-    if (dialogMode.value === 'edit' && !data.password) {
-      delete data.password
-    }
-    if (dialogMode.value === 'create') {
-      await createUser(data)
-      ElMessage.success('ç”¨æˆ·åˆ›å»ºæˆåŠŸ')
+    if (editingUser.value) {
+      const data: Partial<User> = {
+        email: form.value.email,
+        traffic_limit: form.value.traffic_limit,
+        speed_limit_up: form.value.speed_limit_up,
+        speed_limit_down: form.value.speed_limit_down,
+        device_limit: form.value.device_limit,
+        expired_at: form.value.expired_at || null,
+        status: form.value.status,
+      }
+      if (form.value.password) {
+        (data as any).password = form.value.password
+      }
+      await updateUser(editingUser.value.id, data)
     } else {
-      await updateUser(editingId.value, data)
-      ElMessage.success('ç”¨æˆ·æ›´æ–°æˆåŠŸ')
+      await createUser({
+        email: form.value.email,
+        password: form.value.password,
+        traffic_limit: form.value.traffic_limit,
+        speed_limit_up: form.value.speed_limit_up,
+        speed_limit_down: form.value.speed_limit_down,
+        device_limit: form.value.device_limit,
+        expired_at: form.value.expired_at || null,
+        status: form.value.status,
+      })
     }
-    dialogVisible.value = false
-    loadUsers()
-  } catch {
-    // handled by interceptor
+    showDialog.value = false
+    await fetchUsers()
+  } catch (err) {
+    console.error('±£´æÓÃ»§Ê§°Ü:', err)
   } finally {
-    submitting.value = false
+    saving.value = false
   }
 }
 
-async function handleDelete(row: User) {
+function confirmDelete(user: User) {
+  deletingUser.value = user
+  showDeleteDialog.value = true
+}
+
+async function handleDelete() {
+  if (!deletingUser.value) return
   try {
-    await ElMessageBox.confirm(`ç¡®å®šè¦åˆ é™¤ç”¨æˆ· ${row.email} å—ï¼Ÿæ­¤æ“ä½œä¸å¯æ’¤é”€ã€‚`, 'ç¡®è®¤åˆ é™¤', {
-      confirmButtonText: 'ç¡®å®š',
-      cancelButtonText: 'å–æ¶ˆ',
-      type: 'warning'
-    })
-    await deleteUser(row.id)
-    ElMessage.success('ç”¨æˆ·å·²åˆ é™¤')
-    loadUsers()
-  } catch {
-    // cancelled or error
+    await deleteUser(deletingUser.value.id)
+    showDeleteDialog.value = false
+    deletingUser.value = null
+    await fetchUsers()
+  } catch (err) {
+    console.error('É¾³ıÓÃ»§Ê§°Ü:', err)
   }
 }
 
-onMounted(() => {
-  loadUsers()
-  loadPlans()
-})
+function goToPage(p: number) {
+  if (p >= 1 && p <= totalPages.value) {
+    page.value = p
+    fetchUsers()
+  }
+}
+
+function handleSearch() {
+  page.value = 1
+  fetchUsers()
+}
+
+onMounted(fetchUsers)
 </script>
 
-<style scoped>
-.toolbar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
+<template>
+  <div class="space-y-4">
+    <!-- ¶¥²¿²Ù×÷À¸ -->
+    <div class="flex items-center gap-2">
+      <div class="relative flex-1 max-w-sm">
+        <Search class="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
+        <Input
+          v-model="searchQuery"
+          placeholder="ËÑË÷ÓÃ»§..."
+          class="pl-8"
+          @keyup.enter="handleSearch"
+        />
+      </div>
+      <Button @click="openCreate">
+        <Plus class="size-4" />
+        ´´½¨ÓÃ»§
+      </Button>
+    </div>
 
-.toolbar-left {
-  display: flex;
-  align-items: center;
-}
+    <!-- ÓÃ»§±í¸ñ -->
+    <div class="rounded-lg border">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead class="w-16">ID</TableHead>
+            <TableHead>ÓÊÏä</TableHead>
+            <TableHead>UUID</TableHead>
+            <TableHead>Á÷Á¿</TableHead>
+            <TableHead>ÏŞËÙ</TableHead>
+            <TableHead>×´Ì¬</TableHead>
+            <TableHead>µ½ÆÚÊ±¼ä</TableHead>
+            <TableHead class="w-16">²Ù×÷</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          <TableRow v-if="loading">
+            <TableCell colspan="8" class="h-24 text-center text-muted-foreground">
+              ¼ÓÔØÖĞ...
+            </TableCell>
+          </TableRow>
+          <TableRow v-else-if="users.length === 0">
+            <TableCell colspan="8" class="h-24 text-center text-muted-foreground">
+              ÔİÎŞÊı¾İ
+            </TableCell>
+          </TableRow>
+          <TableRow v-for="user in users" :key="user.id">
+            <TableCell class="font-medium">{{ user.id }}</TableCell>
+            <TableCell>{{ user.email }}</TableCell>
+            <TableCell class="font-mono text-xs">
+              {{ user.uuid.slice(0, 8) }}...
+            </TableCell>
+            <TableCell>
+              {{ formatTraffic(user.traffic_used) }} / {{ formatTraffic(user.traffic_limit) }}
+            </TableCell>
+            <TableCell>
+              ¡ü{{ user.speed_limit_up || '¡Ş' }} ¡ı{{ user.speed_limit_down || '¡Ş' }}
+            </TableCell>
+            <TableCell>
+              <Badge :variant="user.status === 1 ? 'default' : 'destructive'">
+                {{ user.status === 1 ? 'Õı³£' : '½ûÓÃ' }}
+              </Badge>
+            </TableCell>
+            <TableCell>{{ formatDate(user.expired_at) }}</TableCell>
+            <TableCell>
+              <DropdownMenu>
+                <DropdownMenuTrigger as-child>
+                  <Button variant="ghost" size="icon-sm">
+                    <MoreHorizontal class="size-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent>
+                  <DropdownMenuItem @click="openEdit(user)">
+                    <Pencil class="size-4" />
+                    ±à¼­
+                  </DropdownMenuItem>
+                  <DropdownMenuItem @click="confirmDelete(user)" class="text-destructive">
+                    <Trash2 class="size-4" />
+                    É¾³ı
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </TableCell>
+          </TableRow>
+        </TableBody>
+      </Table>
+    </div>
 
-.pagination-wrapper {
-  margin-top: 20px;
-  display: flex;
-  justify-content: flex-end;
-}
-</style>
+    <!-- ·ÖÒ³ -->
+    <div v-if="totalPages > 1" class="flex justify-center">
+      <nav class="flex items-center gap-1">
+        <Button variant="ghost" size="sm" :disabled="page <= 1" @click="goToPage(page - 1)">
+          ÉÏÒ»Ò³
+        </Button>
+        <Button
+          v-for="p in totalPages"
+          :key="p"
+          :variant="p === page ? 'outline' : 'ghost'"
+          size="sm"
+          @click="goToPage(p)"
+        >
+          {{ p }}
+        </Button>
+        <Button variant="ghost" size="sm" :disabled="page >= totalPages" @click="goToPage(page + 1)">
+          ÏÂÒ»Ò³
+        </Button>
+      </nav>
+    </div>
+
+    <!-- ´´½¨/±à¼­¶Ô»°¿ò -->
+    <Dialog v-model:open="showDialog">
+      <DialogContent class="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>{{ editingUser ? '±à¼­ÓÃ»§' : '´´½¨ÓÃ»§' }}</DialogTitle>
+          <DialogDescription>
+            {{ editingUser ? 'ĞŞ¸ÄÓÃ»§ĞÅÏ¢' : 'ÌîĞ´ĞÂÓÃ»§ĞÅÏ¢' }}
+          </DialogDescription>
+        </DialogHeader>
+        <form class="grid gap-4 py-4" @submit.prevent="handleSave">
+          <div class="grid gap-2">
+            <Label for="form-email">ÓÊÏä</Label>
+            <Input id="form-email" v-model="form.email" type="email" required />
+          </div>
+          <div class="grid gap-2">
+            <Label for="form-password">{{ editingUser ? 'ĞÂÃÜÂë£¨Áô¿Õ²»ĞŞ¸Ä£©' : 'ÃÜÂë' }}</Label>
+            <Input id="form-password" v-model="form.password" type="password" :required="!editingUser" />
+          </div>
+          <div class="grid grid-cols-2 gap-4">
+            <div class="grid gap-2">
+              <Label for="form-traffic">Á÷Á¿ÏŞÖÆ (×Ö½Ú)</Label>
+              <Input id="form-traffic" v-model.number="form.traffic_limit" type="number" />
+            </div>
+            <div class="grid gap-2">
+              <Label for="form-device">Éè±¸ÏŞÖÆ</Label>
+              <Input id="form-device" v-model.number="form.device_limit" type="number" />
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-4">
+            <div class="grid gap-2">
+              <Label for="form-up">ÉÏĞĞÏŞËÙ</Label>
+              <Input id="form-up" v-model.number="form.speed_limit_up" type="number" />
+            </div>
+            <div class="grid gap-2">
+              <Label for="form-down">ÏÂĞĞÏŞËÙ</Label>
+              <Input id="form-down" v-model.number="form.speed_limit_down" type="number" />
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-4">
+            <div class="grid gap-2">
+              <Label for="form-expired">µ½ÆÚÊ±¼ä</Label>
+              <Input id="form-expired" v-model="form.expired_at" type="date" />
+            </div>
+            <div class="grid gap-2">
+              <Label for="form-status">×´Ì¬</Label>
+              <select
+                id="form-status"
+                v-model.number="form.status"
+                class="border-input bg-background h-8 rounded-md border px-3 text-sm"
+              >
+                <option :value="1">Õı³£</option>
+                <option :value="0">½ûÓÃ</option>
+              </select>
+            </div>
+          </div>
+        </form>
+        <DialogFooter>
+          <Button variant="outline" @click="showDialog = false">È¡Ïû</Button>
+          <Button :disabled="saving" @click="handleSave">
+            {{ saving ? '±£´æÖĞ...' : '±£´æ' }}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <!-- É¾³ıÈ·ÈÏ¶Ô»°¿ò -->
+    <Dialog v-model:open="showDeleteDialog">
+      <DialogContent class="sm:max-w-sm">
+        <DialogHeader>
+          <DialogTitle>È·ÈÏÉ¾³ı</DialogTitle>
+          <DialogDescription>
+            È·¶¨ÒªÉ¾³ıÓÃ»§ <strong>{{ deletingUser?.email }}</strong> Âğ£¿´Ë²Ù×÷²»¿É³·Ïú¡£
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline" @click="showDeleteDialog = false">È¡Ïû</Button>
+          <Button variant="destructive" @click="handleDelete">É¾³ı</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  </div>
+</template>

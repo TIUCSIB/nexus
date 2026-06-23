@@ -1,237 +1,332 @@
-Ôªø<template>
-  <div class="plans-page">
-    <el-card shadow="never">
-      <div class="toolbar">
-        <div class="toolbar-left">
-          <el-input
-            v-model="searchKeyword"
-            placeholder="ÊêúÁ¥¢Â•óÈ§êÂêçÁß∞"
-            style="width: 240px"
-            clearable
-            @clear="loadPlans"
-            @keyup.enter="loadPlans"
-          >
-            <template #prefix>
-              <el-icon><Search /></el-icon>
-            </template>
-          </el-input>
-          <el-button type="primary" style="margin-left: 10px" @click="loadPlans">ÊêúÁ¥¢</el-button>
-        </div>
-        <el-button type="success" @click="openDialog('create')">Ê∑ªÂä†Â•óÈ§ê</el-button>
-      </div>
-
-      <el-table :data="plans" v-loading="loading" stripe style="margin-top: 16px">
-        <el-table-column prop="id" label="ID" width="70" />
-        <el-table-column prop="name" label="Â•óÈ§êÂêçÁß∞" min-width="150" />
-        <el-table-column label="ÊµÅÈáèÈôêÂà∂" min-width="120">
-          <template #default="{ row }">
-            {{ formatTraffic(row.traffic_limit) }}
-          </template>
-        </el-table-column>
-        <el-table-column label="ÊúâÊïàÂ§©Êï∞" width="100">
-          <template #default="{ row }">
-            {{ row.duration_days }} Â§©
-          </template>
-        </el-table-column>
-        <el-table-column label="‰ª∑Ê†º" width="100">
-          <template #default="{ row }">
-            &yen;{{ row.price.toFixed(2) }}
-          </template>
-        </el-table-column>
-        <el-table-column prop="description" label="ÊèèËø∞" min-width="200" show-overflow-tooltip />
-        <el-table-column label="ÂàõÂª∫Êó∂Èó¥" width="170">
-          <template #default="{ row }">
-            {{ formatDate(row.created_at) }}
-          </template>
-        </el-table-column>
-        <el-table-column label="Êìç‰Ωú" width="160" fixed="right">
-          <template #default="{ row }">
-            <el-button link type="primary" @click="openDialog('edit', row)">ÁºñËæë</el-button>
-            <el-button link type="danger" @click="handleDelete(row)">Âà†Èô§</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-
-      <div class="pagination-wrapper">
-        <el-pagination
-          v-model:current-page="page"
-          v-model:page-size="pageSize"
-          :total="total"
-          :page-sizes="[10, 20, 50]"
-          layout="total, sizes, prev, pager, next, jumper"
-          @size-change="loadPlans"
-          @current-change="loadPlans"
-        />
-      </div>
-    </el-card>
-
-    <el-dialog
-      v-model="dialogVisible"
-      :title="dialogMode === 'create' ? 'Ê∑ªÂä†Â•óÈ§ê' : 'ÁºñËæëÂ•óÈ§ê'"
-      width="520px"
-      destroy-on-close
-    >
-      <el-form ref="formRef" :model="form" :rules="formRules" label-width="100px">
-        <el-form-item label="Â•óÈ§êÂêçÁß∞" prop="name">
-          <el-input v-model="form.name" placeholder="ËØ∑ËæìÂÖ•Â•óÈ§êÂêçÁß∞" />
-        </el-form-item>
-        <el-form-item label="ÊµÅÈáèÈôêÂà∂(Â≠óËäÇ)" prop="traffic_limit">
-          <el-input-number v-model="form.traffic_limit" :min="0" :step="1073741824" style="width: 100%" />
-        </el-form-item>
-        <el-form-item label="ÊúâÊïàÂ§©Êï∞" prop="duration_days">
-          <el-input-number v-model="form.duration_days" :min="1" style="width: 100%" />
-        </el-form-item>
-        <el-form-item label="‰ª∑Ê†º" prop="price">
-          <el-input-number v-model="form.price" :min="0" :precision="2" :step="10" style="width: 100%" />
-        </el-form-item>
-        <el-form-item label="ÊèèËø∞" prop="description">
-          <el-input v-model="form.description" type="textarea" :rows="3" placeholder="ËØ∑ËæìÂÖ•Â•óÈ§êÊèèËø∞" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="dialogVisible = false">ÂèñÊ∂à</el-button>
-        <el-button type="primary" :loading="submitting" @click="handleSubmit">Á°ÆÂÆö</el-button>
-      </template>
-    </el-dialog>
-  </div>
-</template>
-
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
-import type { FormInstance, FormRules } from 'element-plus'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ref, onMounted, computed } from 'vue'
 import { listPlans, createPlan, updatePlan, deletePlan } from '@/api/plan'
 import type { Plan } from '@/types'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Badge } from '@/components/ui/badge'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import {
+  Pagination,
+  PaginationContent,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from '@/components/ui/pagination'
+import { Plus, MoreHorizontal, Pencil, Trash2 } from '@lucide/vue'
 
 const plans = ref<Plan[]>([])
-const loading = ref(false)
-const submitting = ref(false)
+const total = ref(0)
 const page = ref(1)
 const pageSize = ref(20)
-const total = ref(0)
-const searchKeyword = ref('')
-const dialogVisible = ref(false)
-const dialogMode = ref<'create' | 'edit'>('create')
-const editingId = ref(0)
-const formRef = ref<FormInstance>()
+const loading = ref(false)
 
-const form = reactive({
+const showDialog = ref(false)
+const showDeleteDialog = ref(false)
+const editingPlan = ref<Plan | null>(null)
+const deletingPlan = ref<Plan | null>(null)
+const saving = ref(false)
+
+const form = ref({
   name: '',
-  traffic_limit: 107374182400,
+  description: '',
+  traffic_limit: 0,
   duration_days: 30,
   price: 0,
-  description: ''
+  sort: 0,
+  status: 1,
 })
 
-const formRules: FormRules = {
-  name: [{ required: true, message: 'ËØ∑ËæìÂÖ•Â•óÈ§êÂêçÁß∞', trigger: 'blur' }],
-  traffic_limit: [{ required: true, message: 'ËØ∑ËæìÂÖ•ÊµÅÈáèÈôêÂà∂', trigger: 'blur' }],
-  duration_days: [{ required: true, message: 'ËØ∑ËæìÂÖ•ÊúâÊïàÂ§©Êï∞', trigger: 'blur' }],
-  price: [{ required: true, message: 'ËØ∑ËæìÂÖ•‰ª∑Ê†º', trigger: 'blur' }]
-}
+const totalPages = computed(() => Math.ceil(total.value / pageSize.value))
 
 function formatTraffic(bytes: number): string {
-  if (!bytes || bytes === 0) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  const i = Math.floor(Math.log(bytes) / Math.log(1024))
-  return (bytes / Math.pow(1024, i)).toFixed(2) + ' ' + units[i]
+  if (bytes >= 1073741824) {
+    return (bytes / 1073741824).toFixed(2) + ' GB'
+  }
+  if (bytes >= 1048576) {
+    return (bytes / 1048576).toFixed(2) + ' MB'
+  }
+  if (bytes === 0) return '≤ªœﬁ'
+  return bytes + ' B'
 }
 
-function formatDate(dateStr: string): string {
-  return new Date(dateStr).toLocaleString('zh-CN')
+function formatPrice(price: number): string {
+  return '£§' + (price / 100).toFixed(2)
 }
 
-async function loadPlans() {
+async function fetchPlans() {
   loading.value = true
   try {
-    const res = await listPlans({ page: page.value, page_size: pageSize.value, keyword: searchKeyword.value })
-    plans.value = res.data.list || []
-    total.value = res.data.total || 0
-  } catch {
-    // handled by interceptor
+    const res = await listPlans({ page: page.value, page_size: pageSize.value })
+    if (res.code === 0 && res.data) {
+      plans.value = res.data.items
+      total.value = res.data.total
+    }
+  } catch (err) {
+    console.error('ªÒ»°Ã◊≤Õ¡–±Ì ß∞‹:', err)
   } finally {
     loading.value = false
   }
 }
 
-function openDialog(mode: 'create' | 'edit', row?: Plan) {
-  dialogMode.value = mode
-  dialogVisible.value = true
-  if (mode === 'edit' && row) {
-    editingId.value = row.id
-    form.name = row.name
-    form.traffic_limit = row.traffic_limit
-    form.duration_days = row.duration_days
-    form.price = row.price
-    form.description = row.description || ''
-  } else {
-    editingId.value = 0
-    form.name = ''
-    form.traffic_limit = 107374182400
-    form.duration_days = 30
-    form.price = 0
-    form.description = ''
+function openCreate() {
+  editingPlan.value = null
+  form.value = {
+    name: '',
+    description: '',
+    traffic_limit: 0,
+    duration_days: 30,
+    price: 0,
+    sort: 0,
+    status: 1,
   }
+  showDialog.value = true
 }
 
-async function handleSubmit() {
-  if (!formRef.value) return
-  const valid = await formRef.value.validate().catch(() => false)
-  if (!valid) return
+function openEdit(plan: Plan) {
+  editingPlan.value = plan
+  form.value = {
+    name: plan.name,
+    description: plan.description,
+    traffic_limit: plan.traffic_limit,
+    duration_days: plan.duration_days,
+    price: plan.price,
+    sort: plan.sort,
+    status: plan.status,
+  }
+  showDialog.value = true
+}
 
-  submitting.value = true
+async function handleSave() {
+  saving.value = true
   try {
-    if (dialogMode.value === 'create') {
-      await createPlan(form)
-      ElMessage.success('Â•óÈ§êÂàõÂª∫ÊàêÂäü')
+    if (editingPlan.value) {
+      await updatePlan(editingPlan.value.id, { ...form.value })
     } else {
-      await updatePlan(editingId.value, form)
-      ElMessage.success('Â•óÈ§êÊõ¥Êñ∞ÊàêÂäü')
+      await createPlan({ ...form.value })
     }
-    dialogVisible.value = false
-    loadPlans()
-  } catch {
-    // handled by interceptor
+    showDialog.value = false
+    await fetchPlans()
+  } catch (err) {
+    console.error('±£¥ÊÃ◊≤Õ ß∞‹:', err)
   } finally {
-    submitting.value = false
+    saving.value = false
   }
 }
 
-async function handleDelete(row: Plan) {
+function confirmDelete(plan: Plan) {
+  deletingPlan.value = plan
+  showDeleteDialog.value = true
+}
+
+async function handleDelete() {
+  if (!deletingPlan.value) return
   try {
-    await ElMessageBox.confirm(`Á°ÆÂÆöË¶ÅÂà†Èô§Â•óÈ§ê„Äå${row.name}„ÄçÂêóÔºü`, 'Á°ÆËÆ§Âà†Èô§', {
-      confirmButtonText: 'Á°ÆÂÆö',
-      cancelButtonText: 'ÂèñÊ∂à',
-      type: 'warning'
-    })
-    await deletePlan(row.id)
-    ElMessage.success('Â•óÈ§êÂ∑≤Âà†Èô§')
-    loadPlans()
-  } catch {
-    // cancelled or error
+    await deletePlan(deletingPlan.value.id)
+    showDeleteDialog.value = false
+    deletingPlan.value = null
+    await fetchPlans()
+  } catch (err) {
+    console.error('…æ≥˝Ã◊≤Õ ß∞‹:', err)
   }
 }
 
-onMounted(() => {
-  loadPlans()
-})
+function goToPage(p: number) {
+  if (p >= 1 && p <= totalPages.value) {
+    page.value = p
+    fetchPlans()
+  }
+}
+
+onMounted(fetchPlans)
 </script>
 
-<style scoped>
-.toolbar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
+<template>
+  <div class="space-y-4">
+    <!-- ∂•≤ø≤Ÿ◊˜¿∏ -->
+    <div class="flex items-center justify-between">
+      <h2 class="text-lg font-semibold">Ã◊≤Õπ‹¿Ì</h2>
+      <Button @click="openCreate">
+        <Plus class="size-4" />
+        ¥¥Ω®Ã◊≤Õ
+      </Button>
+    </div>
 
-.toolbar-left {
-  display: flex;
-  align-items: center;
-}
+    <!-- Ã◊≤Õ±Ì∏Ò -->
+    <div class="rounded-lg border">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead class="w-16">ID</TableHead>
+            <TableHead>√˚≥∆</TableHead>
+            <TableHead>¡˜¡øœﬁ÷∆</TableHead>
+            <TableHead> ±≥§£®ÃÏ£©</TableHead>
+            <TableHead>º€∏Ò</TableHead>
+            <TableHead>≈≈–Ú</TableHead>
+            <TableHead>◊¥Ã¨</TableHead>
+            <TableHead class="w-16">≤Ÿ◊˜</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          <TableRow v-if="loading">
+            <TableCell colspan="8" class="h-24 text-center text-muted-foreground">
+              º”‘ÿ÷–...
+            </TableCell>
+          </TableRow>
+          <TableRow v-else-if="plans.length === 0">
+            <TableCell colspan="8" class="h-24 text-center text-muted-foreground">
+              ‘›Œﬁ ˝æ›
+            </TableCell>
+          </TableRow>
+          <TableRow v-for="plan in plans" :key="plan.id">
+            <TableCell class="font-medium">{{ plan.id }}</TableCell>
+            <TableCell>{{ plan.name }}</TableCell>
+            <TableCell>{{ formatTraffic(plan.traffic_limit) }}</TableCell>
+            <TableCell>{{ plan.duration_days }}</TableCell>
+            <TableCell>{{ formatPrice(plan.price) }}</TableCell>
+            <TableCell>{{ plan.sort }}</TableCell>
+            <TableCell>
+              <Badge :variant="plan.status === 1 ? 'default' : 'destructive'">
+                {{ plan.status === 1 ? '…œº‹' : 'œ¬º‹' }}
+              </Badge>
+            </TableCell>
+            <TableCell>
+              <DropdownMenu>
+                <DropdownMenuTrigger as-child>
+                  <Button variant="ghost" size="icon-sm">
+                    <MoreHorizontal class="size-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent>
+                  <DropdownMenuItem @click="openEdit(plan)">
+                    <Pencil class="size-4" />
+                    ±‡º≠
+                  </DropdownMenuItem>
+                  <DropdownMenuItem @click="confirmDelete(plan)" class="text-destructive">
+                    <Trash2 class="size-4" />
+                    …æ≥˝
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </TableCell>
+          </TableRow>
+        </TableBody>
+      </Table>
+    </div>
 
-.pagination-wrapper {
-  margin-top: 20px;
-  display: flex;
-  justify-content: flex-end;
-}
-</style>
+    <!-- ∑÷“≥ -->
+    <Pagination v-if="totalPages > 1" :total="total" :items-per-page="pageSize" :page="page" @update:page="goToPage">
+      <PaginationContent>
+        <PaginationItem>
+          <PaginationPrevious @click="goToPage(page - 1)" />
+        </PaginationItem>
+        <PaginationItem v-for="p in totalPages" :key="p">
+          <PaginationLink :is-active="p === page" @click="goToPage(p)">
+            {{ p }}
+          </PaginationLink>
+        </PaginationItem>
+        <PaginationItem>
+          <PaginationNext @click="goToPage(page + 1)" />
+        </PaginationItem>
+      </PaginationContent>
+    </Pagination>
+
+    <!-- ¥¥Ω®/±‡º≠∂‘ª∞øÚ -->
+    <Dialog v-model:open="showDialog">
+      <DialogContent class="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>{{ editingPlan ? '±‡º≠Ã◊≤Õ' : '¥¥Ω®Ã◊≤Õ' }}</DialogTitle>
+          <DialogDescription>
+            {{ editingPlan ? '–ﬁ∏ƒÃ◊≤Õ–≈œ¢' : 'ÃÓ–¥–¬Ã◊≤Õ–≈œ¢' }}
+          </DialogDescription>
+        </DialogHeader>
+        <form class="grid gap-4 py-4" @submit.prevent="handleSave">
+          <div class="grid gap-2">
+            <Label for="plan-name">√˚≥∆</Label>
+            <Input id="plan-name" v-model="form.name" required />
+          </div>
+          <div class="grid gap-2">
+            <Label for="plan-desc">√Ë ˆ</Label>
+            <Input id="plan-desc" v-model="form.description" />
+          </div>
+          <div class="grid grid-cols-2 gap-4">
+            <div class="grid gap-2">
+              <Label for="plan-traffic">¡˜¡øœﬁ÷∆ (◊÷Ω⁄)</Label>
+              <Input id="plan-traffic" v-model.number="form.traffic_limit" type="number" />
+            </div>
+            <div class="grid gap-2">
+              <Label for="plan-duration"> ±≥§£®ÃÏ£©</Label>
+              <Input id="plan-duration" v-model.number="form.duration_days" type="number" />
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-4">
+            <div class="grid gap-2">
+              <Label for="plan-price">º€∏Ò£®∑÷£©</Label>
+              <Input id="plan-price" v-model.number="form.price" type="number" />
+            </div>
+            <div class="grid gap-2">
+              <Label for="plan-sort">≈≈–Ú</Label>
+              <Input id="plan-sort" v-model.number="form.sort" type="number" />
+            </div>
+          </div>
+          <div class="grid gap-2">
+            <Label for="plan-status">◊¥Ã¨</Label>
+            <select
+              id="plan-status"
+              v-model.number="form.status"
+              class="border-input bg-background h-8 rounded-md border px-3 text-sm"
+            >
+              <option :value="1">…œº‹</option>
+              <option :value="0">œ¬º‹</option>
+            </select>
+          </div>
+        </form>
+        <DialogFooter>
+          <Button variant="outline" @click="showDialog = false">»°œ˚</Button>
+          <Button :disabled="saving" @click="handleSave">
+            {{ saving ? '±£¥Ê÷–...' : '±£¥Ê' }}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <!-- …æ≥˝»∑»œ∂‘ª∞øÚ -->
+    <Dialog v-model:open="showDeleteDialog">
+      <DialogContent class="sm:max-w-sm">
+        <DialogHeader>
+          <DialogTitle>»∑»œ…æ≥˝</DialogTitle>
+          <DialogDescription>
+            »∑∂®“™…æ≥˝Ã◊≤Õ <strong>{{ deletingPlan?.name }}</strong> ¬£ø¥À≤Ÿ◊˜≤ªø…≥∑œ˙°£
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline" @click="showDeleteDialog = false">»°œ˚</Button>
+          <Button variant="destructive" @click="handleDelete">…æ≥˝</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  </div>
+</template>

@@ -1,290 +1,390 @@
-Ôªø<template>
-  <div class="nodes-page">
-    <el-card shadow="never">
-      <div class="toolbar">
-        <div class="toolbar-left">
-          <el-input
-            v-model="searchKeyword"
-            placeholder="ÊêúÁ¥¢ËäÇÁÇπÂêçÁß∞ÊàñÂú∞ÂùÄ"
-            style="width: 240px"
-            clearable
-            @clear="loadNodes"
-            @keyup.enter="loadNodes"
-          >
-            <template #prefix>
-              <el-icon><Search /></el-icon>
-            </template>
-          </el-input>
-          <el-select v-model="searchStatus" placeholder="Áä∂ÊÄÅÁ≠õÈÄâ" clearable style="width: 140px; margin-left: 10px" @change="loadNodes">
-            <el-option label="Âú®Á∫ø" value="online" />
-            <el-option label="Á¶ªÁ∫ø" value="offline" />
-            <el-option label="Áª¥Êä§‰∏≠" value="maintenance" />
-          </el-select>
-          <el-button type="primary" style="margin-left: 10px" @click="loadNodes">ÊêúÁ¥¢</el-button>
-        </div>
-        <el-button type="success" @click="openDialog('create')">Ê∑ªÂä†ËäÇÁÇπ</el-button>
-      </div>
-
-      <el-table :data="nodes" v-loading="loading" stripe style="margin-top: 16px">
-        <el-table-column prop="id" label="ID" width="70" />
-        <el-table-column prop="name" label="ËäÇÁÇπÂêçÁß∞" min-width="150" />
-        <el-table-column prop="address" label="Âú∞ÂùÄ" min-width="150" />
-        <el-table-column prop="port" label="Á´ØÂè£" width="80" />
-        <el-table-column label="ÂçèËÆÆ" width="110">
-          <template #default="{ row }">
-            <el-tag type="info">{{ row.protocol.toUpperCase() }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="Áä∂ÊÄÅ" width="100">
-          <template #default="{ row }">
-            <el-tag :type="nodeStatusType(row.status)" effect="dark">
-              <span class="status-dot" :class="'dot-' + row.status"></span>
-              {{ nodeStatusLabel(row.status) }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="config_mode" label="ÈÖçÁΩÆÊ®°Âºè" width="100" />
-        <el-table-column label="ÂÄçÁéá" width="80">
-          <template #default="{ row }">
-            {{ row.traffic_rate }}x
-          </template>
-        </el-table-column>
-        <el-table-column prop="sort_order" label="ÊéíÂ∫è" width="70" />
-        <el-table-column label="Êìç‰Ωú" width="160" fixed="right">
-          <template #default="{ row }">
-            <el-button link type="primary" @click="openDialog('edit', row)">ÁºñËæë</el-button>
-            <el-button link type="danger" @click="handleDelete(row)">Âà†Èô§</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-
-      <div class="pagination-wrapper">
-        <el-pagination
-          v-model:current-page="page"
-          v-model:page-size="pageSize"
-          :total="total"
-          :page-sizes="[10, 20, 50]"
-          layout="total, sizes, prev, pager, next, jumper"
-          @size-change="loadNodes"
-          @current-change="loadNodes"
-        />
-      </div>
-    </el-card>
-
-    <el-dialog
-      v-model="dialogVisible"
-      :title="dialogMode === 'create' ? 'Ê∑ªÂä†ËäÇÁÇπ' : 'ÁºñËæëËäÇÁÇπ'"
-      width="560px"
-      destroy-on-close
-    >
-      <el-form ref="formRef" :model="form" :rules="formRules" label-width="100px">
-        <el-form-item label="ËäÇÁÇπÂêçÁß∞" prop="name">
-          <el-input v-model="form.name" placeholder="ËØ∑ËæìÂÖ•ËäÇÁÇπÂêçÁß∞" />
-        </el-form-item>
-        <el-form-item label="Âú∞ÂùÄ" prop="address">
-          <el-input v-model="form.address" placeholder="IPÊàñÂüüÂêç" />
-        </el-form-item>
-        <el-form-item label="Á´ØÂè£" prop="port">
-          <el-input-number v-model="form.port" :min="1" :max="65535" style="width: 100%" />
-        </el-form-item>
-        <el-form-item label="ÂçèËÆÆ" prop="protocol">
-          <el-select v-model="form.protocol" style="width: 100%">
-            <el-option label="VMess" value="vmess" />
-            <el-option label="VLESS" value="vless" />
-            <el-option label="Trojan" value="trojan" />
-            <el-option label="Shadowsocks" value="shadowsocks" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="Áä∂ÊÄÅ" prop="status">
-          <el-select v-model="form.status" style="width: 100%">
-            <el-option label="Âú®Á∫ø" value="online" />
-            <el-option label="Á¶ªÁ∫ø" value="offline" />
-            <el-option label="Áª¥Êä§‰∏≠" value="maintenance" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="ÈÖçÁΩÆÊ®°Âºè" prop="config_mode">
-          <el-input v-model="form.config_mode" placeholder="Â¶Ç: default, cdn, ws" />
-        </el-form-item>
-        <el-form-item label="ÊµÅÈáèÂÄçÁéá" prop="traffic_rate">
-          <el-input-number v-model="form.traffic_rate" :min="0" :max="100" :precision="1" :step="0.1" style="width: 100%" />
-        </el-form-item>
-        <el-form-item label="ÊéíÂ∫è" prop="sort_order">
-          <el-input-number v-model="form.sort_order" :min="0" style="width: 100%" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="dialogVisible = false">ÂèñÊ∂à</el-button>
-        <el-button type="primary" :loading="submitting" @click="handleSubmit">Á°ÆÂÆö</el-button>
-      </template>
-    </el-dialog>
-  </div>
-</template>
-
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
-import type { FormInstance, FormRules } from 'element-plus'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { listNodes, createNode, updateNode, deleteNode } from '@/api/node'
+import { ref, onMounted, computed } from 'vue'
+import { listNodes, createNode, updateNode, deleteNode, restartNode } from '@/api/node'
 import type { Node } from '@/types'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Badge } from '@/components/ui/badge'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import {
+  Pagination,
+  PaginationContent,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from '@/components/ui/pagination'
+import { Plus, MoreHorizontal, Pencil, Trash2, RotateCw } from '@lucide/vue'
 
 const nodes = ref<Node[]>([])
-const loading = ref(false)
-const submitting = ref(false)
+const total = ref(0)
 const page = ref(1)
 const pageSize = ref(20)
-const total = ref(0)
-const searchKeyword = ref('')
-const searchStatus = ref('')
-const dialogVisible = ref(false)
-const dialogMode = ref<'create' | 'edit'>('create')
-const editingId = ref(0)
-const formRef = ref<FormInstance>()
+const loading = ref(false)
+const restartingId = ref<number | null>(null)
 
-const form = reactive({
+const showDialog = ref(false)
+const showDeleteDialog = ref(false)
+const editingNode = ref<Node | null>(null)
+const deletingNode = ref<Node | null>(null)
+const saving = ref(false)
+
+const form = ref({
   name: '',
   address: '',
+  protocol: 'vless',
   port: 443,
-  protocol: 'vmess' as 'vmess' | 'vless' | 'trojan' | 'shadowsocks',
-  status: 'online' as 'online' | 'offline' | 'maintenance',
-  config_mode: 'default',
-  traffic_rate: 1.0,
-  sort_order: 0
+  config_mode: 'auto',
+  config_json: '',
+  sort: 0,
+  status: 1,
 })
 
-const formRules: FormRules = {
-  name: [{ required: true, message: 'ËØ∑ËæìÂÖ•ËäÇÁÇπÂêçÁß∞', trigger: 'blur' }],
-  address: [{ required: true, message: 'ËØ∑ËæìÂÖ•Âú∞ÂùÄ', trigger: 'blur' }],
-  port: [{ required: true, message: 'ËØ∑ËæìÂÖ•Á´ØÂè£', trigger: 'blur' }],
-  protocol: [{ required: true, message: 'ËØ∑ÈÄâÊã©ÂçèËÆÆ', trigger: 'change' }]
+const totalPages = computed(() => Math.ceil(total.value / pageSize.value))
+
+function formatDate(dateStr: string | null): string {
+  if (!dateStr) return '-'
+  return new Date(dateStr).toLocaleString('zh-CN')
 }
 
-function nodeStatusType(status: string) {
-  const map: Record<string, string> = { online: 'success', offline: 'danger', maintenance: 'warning' }
-  return (map[status] || 'info') as any
-}
-
-function nodeStatusLabel(status: string) {
-  const map: Record<string, string> = { online: 'Âú®Á∫ø', offline: 'Á¶ªÁ∫ø', maintenance: 'Áª¥Êä§‰∏≠' }
-  return map[status] || status
-}
-
-async function loadNodes() {
+async function fetchNodes() {
   loading.value = true
   try {
-    const res = await listNodes({ page: page.value, page_size: pageSize.value, keyword: searchKeyword.value, status: searchStatus.value || undefined })
-    nodes.value = res.data.list || []
-    total.value = res.data.total || 0
-  } catch {
-    // handled by interceptor
+    const res = await listNodes({ page: page.value, page_size: pageSize.value })
+    if (res.code === 0 && res.data) {
+      nodes.value = res.data.items
+      total.value = res.data.total
+    }
+  } catch (err) {
+    console.error('ªÒ»°Ω⁄µ„¡–±Ì ß∞‹:', err)
   } finally {
     loading.value = false
   }
 }
 
-function openDialog(mode: 'create' | 'edit', row?: Node) {
-  dialogMode.value = mode
-  dialogVisible.value = true
-  if (mode === 'edit' && row) {
-    editingId.value = row.id
-    form.name = row.name
-    form.address = row.address
-    form.port = row.port
-    form.protocol = row.protocol
-    form.status = row.status
-    form.config_mode = row.config_mode || 'default'
-    form.traffic_rate = row.traffic_rate || 1.0
-    form.sort_order = row.sort_order || 0
-  } else {
-    editingId.value = 0
-    form.name = ''
-    form.address = ''
-    form.port = 443
-    form.protocol = 'vmess'
-    form.status = 'online'
-    form.config_mode = 'default'
-    form.traffic_rate = 1.0
-    form.sort_order = 0
+function openCreate() {
+  editingNode.value = null
+  form.value = {
+    name: '',
+    address: '',
+    protocol: 'vless',
+    port: 443,
+    config_mode: 'auto',
+    config_json: '',
+    sort: 0,
+    status: 1,
   }
+  showDialog.value = true
 }
 
-async function handleSubmit() {
-  if (!formRef.value) return
-  const valid = await formRef.value.validate().catch(() => false)
-  if (!valid) return
+function openEdit(node: Node) {
+  editingNode.value = node
+  form.value = {
+    name: node.name,
+    address: node.address,
+    protocol: node.protocol,
+    port: node.port,
+    config_mode: node.config_mode,
+    config_json: node.config_json,
+    sort: node.sort,
+    status: node.status,
+  }
+  showDialog.value = true
+}
 
-  submitting.value = true
+async function handleSave() {
+  saving.value = true
   try {
-    if (dialogMode.value === 'create') {
-      await createNode(form)
-      ElMessage.success('ËäÇÁÇπÂàõÂª∫ÊàêÂäü')
+    if (editingNode.value) {
+      await updateNode(editingNode.value.id, { ...form.value })
     } else {
-      await updateNode(editingId.value, form)
-      ElMessage.success('ËäÇÁÇπÊõ¥Êñ∞ÊàêÂäü')
+      await createNode({ ...form.value })
     }
-    dialogVisible.value = false
-    loadNodes()
-  } catch {
-    // handled by interceptor
+    showDialog.value = false
+    await fetchNodes()
+  } catch (err) {
+    console.error('±£¥ÊΩ⁄µ„ ß∞‹:', err)
   } finally {
-    submitting.value = false
+    saving.value = false
   }
 }
 
-async function handleDelete(row: Node) {
+function confirmDelete(node: Node) {
+  deletingNode.value = node
+  showDeleteDialog.value = true
+}
+
+async function handleDelete() {
+  if (!deletingNode.value) return
   try {
-    await ElMessageBox.confirm(`Á°ÆÂÆöË¶ÅÂà†Èô§ËäÇÁÇπ„Äå${row.name}„ÄçÂêóÔºü`, 'Á°ÆËÆ§Âà†Èô§', {
-      confirmButtonText: 'Á°ÆÂÆö',
-      cancelButtonText: 'ÂèñÊ∂à',
-      type: 'warning'
-    })
-    await deleteNode(row.id)
-    ElMessage.success('ËäÇÁÇπÂ∑≤Âà†Èô§')
-    loadNodes()
-  } catch {
-    // cancelled or error
+    await deleteNode(deletingNode.value.id)
+    showDeleteDialog.value = false
+    deletingNode.value = null
+    await fetchNodes()
+  } catch (err) {
+    console.error('…æ≥˝Ω⁄µ„ ß∞‹:', err)
   }
 }
 
-onMounted(() => {
-  loadNodes()
-})
+async function handleRestart(id: number) {
+  restartingId.value = id
+  try {
+    await restartNode(id)
+  } catch (err) {
+    console.error('÷ÿ∆ÙΩ⁄µ„ ß∞‹:', err)
+  } finally {
+    restartingId.value = null
+  }
+}
+
+function goToPage(p: number) {
+  if (p >= 1 && p <= totalPages.value) {
+    page.value = p
+    fetchNodes()
+  }
+}
+
+onMounted(fetchNodes)
 </script>
 
-<style scoped>
-.toolbar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
+<template>
+  <div class="space-y-4">
+    <!-- ∂•≤ø≤Ÿ◊˜¿∏ -->
+    <div class="flex items-center justify-between">
+      <h2 class="text-lg font-semibold">Ω⁄µ„π‹¿Ì</h2>
+      <Button @click="openCreate">
+        <Plus class="size-4" />
+        ¥¥Ω®Ω⁄µ„
+      </Button>
+    </div>
 
-.toolbar-left {
-  display: flex;
-  align-items: center;
-}
+    <!-- Ω⁄µ„±Ì∏Ò -->
+    <div class="rounded-lg border">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead class="w-16">ID</TableHead>
+            <TableHead>√˚≥∆</TableHead>
+            <TableHead>µÿ÷∑</TableHead>
+            <TableHead>–≠“È</TableHead>
+            <TableHead>∂Àø⁄</TableHead>
+            <TableHead>≈‰÷√ƒ£ Ω</TableHead>
+            <TableHead>‘⁄œﬂ</TableHead>
+            <TableHead>◊¥Ã¨</TableHead>
+            <TableHead class="w-24">≤Ÿ◊˜</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          <TableRow v-if="loading">
+            <TableCell colspan="9" class="h-24 text-center text-muted-foreground">
+              º”‘ÿ÷–...
+            </TableCell>
+          </TableRow>
+          <TableRow v-else-if="nodes.length === 0">
+            <TableCell colspan="9" class="h-24 text-center text-muted-foreground">
+              ‘›Œﬁ ˝æ›
+            </TableCell>
+          </TableRow>
+          <TableRow v-for="node in nodes" :key="node.id">
+            <TableCell class="font-medium">{{ node.id }}</TableCell>
+            <TableCell>{{ node.name }}</TableCell>
+            <TableCell class="font-mono text-xs">{{ node.address }}</TableCell>
+            <TableCell>
+              <Badge variant="outline">{{ node.protocol }}</Badge>
+            </TableCell>
+            <TableCell>{{ node.port }}</TableCell>
+            <TableCell>{{ node.config_mode }}</TableCell>
+            <TableCell>
+              <Badge :variant="node.online ? 'default' : 'destructive'" class="gap-1">
+                <span :class="['size-1.5 rounded-full', node.online ? 'bg-green-500' : 'bg-red-500']" />
+                {{ node.online ? '‘⁄œﬂ' : '¿Îœﬂ' }}
+              </Badge>
+            </TableCell>
+            <TableCell>
+              <Badge :variant="node.status === 1 ? 'default' : 'destructive'">
+                {{ node.status === 1 ? '∆Ù”√' : 'Ω˚”√' }}
+              </Badge>
+            </TableCell>
+            <TableCell>
+              <div class="flex items-center gap-1">
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  :disabled="restartingId === node.id"
+                  @click="handleRestart(node.id)"
+                >
+                  <RotateCw :class="['size-4', restartingId === node.id && 'animate-spin']" />
+                </Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger as-child>
+                    <Button variant="ghost" size="icon-sm">
+                      <MoreHorizontal class="size-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent>
+                    <DropdownMenuItem @click="openEdit(node)">
+                      <Pencil class="size-4" />
+                      ±‡º≠
+                    </DropdownMenuItem>
+                    <DropdownMenuItem @click="confirmDelete(node)" class="text-destructive">
+                      <Trash2 class="size-4" />
+                      …æ≥˝
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+            </TableCell>
+          </TableRow>
+        </TableBody>
+      </Table>
+    </div>
 
-.pagination-wrapper {
-  margin-top: 20px;
-  display: flex;
-  justify-content: flex-end;
-}
+    <!-- ∑÷“≥ -->
+    <Pagination v-if="totalPages > 1" :total="total" :items-per-page="pageSize" :page="page" @update:page="goToPage">
+      <PaginationContent>
+        <PaginationItem>
+          <PaginationPrevious @click="goToPage(page - 1)" />
+        </PaginationItem>
+        <PaginationItem v-for="p in totalPages" :key="p">
+          <PaginationLink :is-active="p === page" @click="goToPage(p)">
+            {{ p }}
+          </PaginationLink>
+        </PaginationItem>
+        <PaginationItem>
+          <PaginationNext @click="goToPage(page + 1)" />
+        </PaginationItem>
+      </PaginationContent>
+    </Pagination>
 
-.status-dot {
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  margin-right: 6px;
-}
+    <!-- ¥¥Ω®/±‡º≠∂‘ª∞øÚ -->
+    <Dialog v-model:open="showDialog">
+      <DialogContent class="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{{ editingNode ? '±‡º≠Ω⁄µ„' : '¥¥Ω®Ω⁄µ„' }}</DialogTitle>
+          <DialogDescription>
+            {{ editingNode ? '–ﬁ∏ƒΩ⁄µ„–≈œ¢' : 'ÃÓ–¥–¬Ω⁄µ„–≈œ¢' }}
+          </DialogDescription>
+        </DialogHeader>
+        <form class="grid gap-4 py-4" @submit.prevent="handleSave">
+          <div class="grid gap-2">
+            <Label for="node-name">√˚≥∆</Label>
+            <Input id="node-name" v-model="form.name" required />
+          </div>
+          <div class="grid gap-2">
+            <Label for="node-address">µÿ÷∑</Label>
+            <Input id="node-address" v-model="form.address" placeholder="example.com" required />
+          </div>
+          <div class="grid grid-cols-2 gap-4">
+            <div class="grid gap-2">
+              <Label>–≠“È</Label>
+              <Select v-model="form.protocol">
+                <SelectTrigger class="w-full">
+                  <SelectValue placeholder="—°‘Ò–≠“È" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="vless">vless</SelectItem>
+                  <SelectItem value="hysteria2">hysteria2</SelectItem>
+                  <SelectItem value="tuic">tuic</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div class="grid gap-2">
+              <Label for="node-port">∂Àø⁄</Label>
+              <Input id="node-port" v-model.number="form.port" type="number" />
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-4">
+            <div class="grid gap-2">
+              <Label>≈‰÷√ƒ£ Ω</Label>
+              <Select v-model="form.config_mode">
+                <SelectTrigger class="w-full">
+                  <SelectValue placeholder="—°‘Òƒ£ Ω" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="auto">◊‘∂Ø</SelectItem>
+                  <SelectItem value="manual"> ÷∂Ø</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div class="grid gap-2">
+              <Label for="node-sort">≈≈–Ú</Label>
+              <Input id="node-sort" v-model.number="form.sort" type="number" />
+            </div>
+          </div>
+          <div class="grid gap-2">
+            <Label for="node-config">≈‰÷√ JSON</Label>
+            <textarea
+              id="node-config"
+              v-model="form.config_json"
+              rows="4"
+              class="border-input bg-background placeholder:text-muted-foreground rounded-md border px-3 py-2 text-sm"
+              placeholder='{"key": "value"}'
+            />
+          </div>
+          <div class="grid gap-2">
+            <Label for="node-status">◊¥Ã¨</Label>
+            <select
+              id="node-status"
+              v-model.number="form.status"
+              class="border-input bg-background h-8 rounded-md border px-3 text-sm"
+            >
+              <option :value="1">∆Ù”√</option>
+              <option :value="0">Ω˚”√</option>
+            </select>
+          </div>
+        </form>
+        <DialogFooter>
+          <Button variant="outline" @click="showDialog = false">»°œ˚</Button>
+          <Button :disabled="saving" @click="handleSave">
+            {{ saving ? '±£¥Ê÷–...' : '±£¥Ê' }}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
 
-.dot-online {
-  background-color: #67c23a;
-}
-
-.dot-offline {
-  background-color: #f56c6c;
-}
-
-.dot-maintenance {
-  background-color: #e6a23c;
-}
-</style>
+    <!-- …æ≥˝»∑»œ∂‘ª∞øÚ -->
+    <Dialog v-model:open="showDeleteDialog">
+      <DialogContent class="sm:max-w-sm">
+        <DialogHeader>
+          <DialogTitle>»∑»œ…æ≥˝</DialogTitle>
+          <DialogDescription>
+            »∑∂®“™…æ≥˝Ω⁄µ„ <strong>{{ deletingNode?.name }}</strong> ¬£ø¥À≤Ÿ◊˜≤ªø…≥∑œ˙°£
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline" @click="showDeleteDialog = false">»°œ˚</Button>
+          <Button variant="destructive" @click="handleDelete">…æ≥˝</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  </div>
+</template>

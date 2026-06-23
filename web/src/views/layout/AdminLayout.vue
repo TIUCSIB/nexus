@@ -1,147 +1,146 @@
-Ôªø<template>
-  <el-container class="admin-layout">
-    <el-aside width="220px" class="sidebar">
-      <div class="logo">
-        <h2>Nexus</h2>
-      </div>
-      <el-menu
-        :default-active="activeMenu"
-        class="sidebar-menu"
-        background-color="#304156"
-        text-color="#bfcbd9"
-        active-text-color="#409eff"
-        router
-      >
-        <el-menu-item index="/dashboard">
-          <el-icon><DataBoard /></el-icon>
-          <span>‰ª™Ë°®Áõò</span>
-        </el-menu-item>
-        <el-menu-item index="/users">
-          <el-icon><User /></el-icon>
-          <span>Áî®Êà∑ÁÆ°ÁêÜ</span>
-        </el-menu-item>
-        <el-menu-item index="/plans">
-          <el-icon><Tickets /></el-icon>
-          <span>Â•óÈ§êÁÆ°ÁêÜ</span>
-        </el-menu-item>
-        <el-menu-item index="/nodes">
-          <el-icon><Connection /></el-icon>
-          <span>ËäÇÁÇπÁÆ°ÁêÜ</span>
-        </el-menu-item>
-        <el-menu-item index="/settings">
-          <el-icon><Setting /></el-icon>
-          <span>Á≥ªÁªüËÆæÁΩÆ</span>
-        </el-menu-item>
-      </el-menu>
-    </el-aside>
-    <el-container>
-      <el-header class="header">
-        <div class="header-left">
-          <h3>{{ currentTitle }}</h3>
-        </div>
-        <div class="header-right">
-          <el-dropdown @command="handleCommand">
-            <span class="el-dropdown-link">
-              ÁÆ°ÁêÜÂëò
-              <el-icon class="el-icon--right"><ArrowDown /></el-icon>
-            </span>
-            <template #dropdown>
-              <el-dropdown-menu>
-                <el-dropdown-item command="logout">ÈÄÄÂá∫ÁôªÂΩï</el-dropdown-item>
-              </el-dropdown-menu>
-            </template>
-          </el-dropdown>
-        </div>
-      </el-header>
-      <el-main class="main-content">
-        <router-view />
-      </el-main>
-    </el-container>
-  </el-container>
-</template>
-
 <script setup lang="ts">
-import { computed } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import {
+  SidebarProvider,
+  Sidebar,
+  SidebarContent,
+  SidebarMenu,
+  SidebarMenuItem,
+  SidebarMenuButton,
+  SidebarGroup,
+  SidebarGroupLabel,
+  SidebarHeader,
+  SidebarFooter,
+  SidebarInset,
+  SidebarTrigger,
+} from '@/components/ui/sidebar'
+import { Separator } from '@/components/ui/separator'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { Button } from '@/components/ui/button'
+import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import {
+  LayoutDashboard,
+  Users,
+  Package,
+  Server,
+  Settings,
+  LogOut,
+  ChevronsUpDown,
+} from '@lucide/vue'
 
+const router = useRouter()
 const route = useRoute()
 const authStore = useAuthStore()
 
-const activeMenu = computed(() => route.path)
-const currentTitle = computed(() => (route.meta.title as string) || '‰ª™Ë°®Áõò')
+const navItems = [
+  { name: '“«±Ì≈Ã', icon: LayoutDashboard, to: '/dashboard' },
+  { name: '”√ªßπ‹¿Ì', icon: Users, to: '/users' },
+  { name: 'Ã◊≤Õπ‹¿Ì', icon: Package, to: '/plans' },
+  { name: 'Ω⁄µ„π‹¿Ì', icon: Server, to: '/nodes' },
+  { name: '…Ë÷√', icon: Settings, to: '/settings' },
+]
 
-function handleCommand(command: string) {
-  if (command === 'logout') {
-    authStore.logout()
-  }
+function handleLogout() {
+  authStore.logout()
+  router.push('/login')
 }
 </script>
 
-<style scoped>
-.admin-layout {
-  height: 100vh;
-  width: 100vw;
-}
+<template>
+  <SidebarProvider>
+    <Sidebar variant="inset">
+      <SidebarHeader>
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton size="lg" as="div">
+              <div class="bg-primary text-primary-foreground flex size-8 items-center justify-center rounded-lg">
+                <Server class="size-4" />
+              </div>
+              <div class="grid flex-1 text-left text-sm leading-tight">
+                <span class="truncate font-semibold">Nexus</span>
+                <span class="truncate text-xs text-muted-foreground">π‹¿Ì∫ÛÃ®</span>
+              </div>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarHeader>
 
-.sidebar {
-  background-color: #304156;
-  overflow-y: auto;
-}
+      <SidebarContent>
+        <SidebarGroup>
+          <SidebarGroupLabel>µº∫Ω≤Àµ•</SidebarGroupLabel>
+          <SidebarMenu>
+            <SidebarMenuItem v-for="item in navItems" :key="item.to">
+              <SidebarMenuButton
+                as="a"
+                :tooltip="item.name"
+                :is-active="route.path === item.to"
+                @click="router.push(item.to)"
+              >
+                <component :is="item.icon" />
+                <span>{{ item.name }}</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          </SidebarMenu>
+        </SidebarGroup>
+      </SidebarContent>
 
-.logo {
-  height: 60px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #fff;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-}
+      <SidebarFooter>
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <DropdownMenu>
+              <DropdownMenuTrigger as-child>
+                <SidebarMenuButton
+                  size="lg"
+                  class="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
+                >
+                  <Avatar class="h-8 w-8 rounded-lg">
+                    <AvatarFallback class="rounded-lg">
+                      {{ authStore.email.charAt(0).toUpperCase() }}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div class="grid flex-1 text-left text-sm leading-tight">
+                    <span class="truncate font-semibold">{{ authStore.email }}</span>
+                    <span class="truncate text-xs text-muted-foreground">π‹¿Ì‘±</span>
+                  </div>
+                  <ChevronsUpDown class="ml-auto size-4" />
+                </SidebarMenuButton>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                side="top"
+                class="w-(--reka-dropdown-menu-trigger-width)"
+              >
+                <DropdownMenuLabel>’À∫≈</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem @click="handleLogout">
+                  <LogOut />
+                  ÕÀ≥ˆµ«¬º
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarFooter>
+    </Sidebar>
 
-.logo h2 {
-  margin: 0;
-  font-size: 20px;
-  font-weight: 600;
-}
-
-.sidebar-menu {
-  border-right: none;
-}
-
-.sidebar-menu .el-menu-item {
-  height: 50px;
-  line-height: 50px;
-}
-
-.sidebar-menu .el-menu-item.is-active {
-  background-color: #263445 !important;
-}
-
-.header {
-  background: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  border-bottom: 1px solid #e6e6e6;
-  padding: 0 20px;
-}
-
-.header-left h3 {
-  margin: 0;
-  font-size: 16px;
-  color: #333;
-}
-
-.el-dropdown-link {
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  color: #333;
-}
-
-.main-content {
-  background-color: #f0f2f5;
-  padding: 20px;
-  overflow-y: auto;
-}
-</style>
+    <SidebarInset>
+      <header class="flex h-12 shrink-0 items-center gap-2 border-b px-4">
+        <SidebarTrigger class="-ml-1" />
+        <Separator orientation="vertical" class="mr-2 h-4" />
+        <h1 class="text-sm font-medium">
+          {{ navItems.find(i => route.path === i.to)?.name || 'Nexus' }}
+        </h1>
+      </header>
+      <main class="flex-1 p-4">
+        <router-view />
+      </main>
+    </SidebarInset>
+  </SidebarProvider>
+</template>
