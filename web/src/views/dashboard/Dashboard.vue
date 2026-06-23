@@ -1,73 +1,75 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { getOverview } from '@/api/stats'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Users, Server, Wifi, Activity } from '@lucide/vue'
+import { Users, Server, Activity, HardDrive } from 'lucide-vue-next'
+import { getOverview } from '@/api/stats'
 
-const overview = ref({
-  total_users: 0,
-  total_nodes: 0,
-  online_nodes: 0,
-  total_traffic: 0,
-})
+const stats = ref({ total_users: 0, total_nodes: 0, online_nodes: 0, total_traffic: 0 })
 const loading = ref(true)
 
-function formatTraffic(bytes: number): string {
-  if (bytes >= 1073741824) {
-    return (bytes / 1073741824).toFixed(2) + ' GB'
-  }
-  if (bytes >= 1048576) {
-    return (bytes / 1048576).toFixed(2) + ' MB'
-  }
-  return bytes + ' B'
+function formatBytes(bytes: number) {
+  if (bytes === 0) return '0 B'
+  const k = 1024
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
+  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
 }
 
 onMounted(async () => {
   try {
     const res = await getOverview()
-    if (res.code === 0 && res.data) {
-      overview.value = res.data
-    }
-  } catch (err) {
-    console.error('»ñÈ¡¸ÅÀÀÊı¾İÊ§°Ü:', err)
+    if (res.code === 0) stats.value = res.data
   } finally {
     loading.value = false
   }
 })
-
-const statCards = [
-  { title: '×ÜÓÃ»§Êı', key: 'total_users' as const, icon: Users, color: 'text-blue-500' },
-  { title: '×Ü½ÚµãÊı', key: 'total_nodes' as const, icon: Server, color: 'text-green-500' },
-  { title: 'ÔÚÏß½Úµã', key: 'online_nodes' as const, icon: Wifi, color: 'text-emerald-500' },
-  { title: '×ÜÁ÷Á¿', key: 'total_traffic' as const, icon: Activity, color: 'text-orange-500', format: true },
-]
 </script>
 
 <template>
   <div class="space-y-6">
+    <h1 class="text-2xl font-bold">ä»ªè¡¨ç›˜</h1>
     <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-      <Card v-for="card in statCards" :key="card.key">
-        <CardHeader class="flex flex-row items-center justify-between space-y-0 pb-2">
-          <CardTitle class="text-sm font-medium">{{ card.title }}</CardTitle>
-          <component :is="card.icon" :class="['size-4 text-muted-foreground', card.color]" />
+      <Card>
+        <CardHeader class="flex flex-row items-center justify-between pb-2">
+          <CardTitle class="text-sm font-medium">ç”¨æˆ·æ€»æ•°</CardTitle>
+          <Users class="h-4 w-4 text-muted-foreground" />
         </CardHeader>
         <CardContent>
-          <div v-if="loading" class="h-8 w-20 animate-pulse rounded bg-muted" />
-          <div v-else class="text-2xl font-bold">
-            {{ card.format ? formatTraffic(overview[card.key]) : overview[card.key] }}
-          </div>
+          <div class="text-2xl font-bold">{{ stats.total_users }}</div>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader class="flex flex-row items-center justify-between pb-2">
+          <CardTitle class="text-sm font-medium">èŠ‚ç‚¹æ€»æ•°</CardTitle>
+          <Server class="h-4 w-4 text-muted-foreground" />
+        </CardHeader>
+        <CardContent>
+          <div class="text-2xl font-bold">{{ stats.total_nodes }}</div>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader class="flex flex-row items-center justify-between pb-2">
+          <CardTitle class="text-sm font-medium">åœ¨çº¿èŠ‚ç‚¹</CardTitle>
+          <Activity class="h-4 w-4 text-muted-foreground" />
+        </CardHeader>
+        <CardContent>
+          <div class="text-2xl font-bold text-green-600">{{ stats.online_nodes }}</div>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader class="flex flex-row items-center justify-between pb-2">
+          <CardTitle class="text-sm font-medium">æ€»æµé‡</CardTitle>
+          <HardDrive class="h-4 w-4 text-muted-foreground" />
+        </CardHeader>
+        <CardContent>
+          <div class="text-2xl font-bold">{{ formatBytes(stats.total_traffic) }}</div>
         </CardContent>
       </Card>
     </div>
-
     <Card>
-      <CardHeader>
-        <CardTitle>Á÷Á¿Í³¼Æ</CardTitle>
-      </CardHeader>
+      <CardHeader><CardTitle>æµé‡è¶‹åŠ¿</CardTitle></CardHeader>
       <CardContent>
-        <div class="flex h-64 items-center justify-center text-muted-foreground">
-          Á÷Á¿Í³¼ÆÍ¼±í¿ª·¢ÖĞ...
-        </div>
+        <p class="text-muted-foreground">æµé‡è¶‹åŠ¿å›¾è¡¨å¼€å‘ä¸­...</p>
       </CardContent>
     </Card>
   </div>

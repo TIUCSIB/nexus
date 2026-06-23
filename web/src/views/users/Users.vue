@@ -1,385 +1,166 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
-import { listUsers, createUser, updateUser, deleteUser } from '@/api/user'
-import type { User } from '@/types'
+import { ref, onMounted } from 'vue'
 import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
-import {
-  Pagination,
-  PaginationContent,
-  PaginationItem,
-  PaginationLink,
-  PaginationNext,
-  PaginationPrevious,
-} from '@/components/ui/pagination'
-import { Plus, Search, MoreHorizontal, Pencil, Trash2 } from '@lucide/vue'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
+import { Plus, Pencil, Trash2 } from 'lucide-vue-next'
+import { listUsers, createUser, updateUser, deleteUser } from '@/api/user'
+import type { User } from '@/types'
 
 const users = ref<User[]>([])
 const total = ref(0)
 const page = ref(1)
 const pageSize = ref(20)
-const searchQuery = ref('')
+const search = ref('')
 const loading = ref(false)
 
-const showDialog = ref(false)
-const showDeleteDialog = ref(false)
-const editingUser = ref<User | null>(null)
-const deletingUser = ref<User | null>(null)
-const saving = ref(false)
+const dialogOpen = ref(false)
+const deleteDialogOpen = ref(false)
+const editingUser = ref<Partial<User> & { password?: string }>({})
+const isEdit = ref(false)
 
-const form = ref({
-  email: '',
-  password: '',
-  traffic_limit: 0,
-  speed_limit_up: 0,
-  speed_limit_down: 0,
-  device_limit: 0,
-  expired_at: '',
-  status: 1,
-})
-
-const totalPages = computed(() => Math.ceil(total.value / pageSize.value))
-
-function formatTraffic(bytes: number): string {
-  if (bytes >= 1073741824) {
-    return (bytes / 1073741824).toFixed(2) + ' GB'
-  }
-  if (bytes >= 1048576) {
-    return (bytes / 1048576).toFixed(2) + ' MB'
-  }
-  if (bytes === 0) return '0 B'
-  return bytes + ' B'
+function formatBytes(b: number) {
+  if (b === 0) return '0 B'
+  const k = 1024, s = ['B', 'KB', 'MB', 'GB', 'TB']
+  const i = Math.floor(Math.log(b) / Math.log(k))
+  return (b / Math.pow(k, i)).toFixed(2) + ' ' + s[i]
 }
 
-function formatDate(dateStr: string | null): string {
-  if (!dateStr) return 'ÓÀ¾Ã'
-  return new Date(dateStr).toLocaleDateString('zh-CN')
-}
-
-async function fetchUsers() {
+async function fetchData() {
   loading.value = true
   try {
-    const res = await listUsers({ page: page.value, page_size: pageSize.value, q: searchQuery.value || undefined })
-    if (res.code === 0 && res.data) {
-      users.value = res.data.items
-      total.value = res.data.total
-    }
-  } catch (err) {
-    console.error('»ñÈ¡ÓÃ»§ÁĞ±íÊ§°Ü:', err)
-  } finally {
-    loading.value = false
-  }
+    const res = await listUsers({ page: page.value, page_size: pageSize.value, q: search.value })
+    if (res.code === 0) { users.value = res.data.items; total.value = res.data.total }
+  } finally { loading.value = false }
 }
 
 function openCreate() {
-  editingUser.value = null
-  form.value = {
-    email: '',
-    password: '',
-    traffic_limit: 0,
-    speed_limit_up: 0,
-    speed_limit_down: 0,
-    device_limit: 0,
-    expired_at: '',
-    status: 1,
-  }
-  showDialog.value = true
+  editingUser.value = { email: '', password: '', traffic_limit: 0, speed_limit_up: 0, speed_limit_down: 0, device_limit: 0, status: 1 }
+  isEdit.value = false
+  dialogOpen.value = true
 }
 
-function openEdit(user: User) {
-  editingUser.value = user
-  form.value = {
-    email: user.email,
-    password: '',
-    traffic_limit: user.traffic_limit,
-    speed_limit_up: user.speed_limit_up,
-    speed_limit_down: user.speed_limit_down,
-    device_limit: user.device_limit,
-    expired_at: user.expired_at ? user.expired_at.slice(0, 10) : '',
-    status: user.status,
-  }
-  showDialog.value = true
+function openEdit(u: User) {
+  editingUser.value = { ...u, password: '' }
+  isEdit.value = true
+  dialogOpen.value = true
 }
 
 async function handleSave() {
-  saving.value = true
-  try {
-    if (editingUser.value) {
-      const data: Partial<User> = {
-        email: form.value.email,
-        traffic_limit: form.value.traffic_limit,
-        speed_limit_up: form.value.speed_limit_up,
-        speed_limit_down: form.value.speed_limit_down,
-        device_limit: form.value.device_limit,
-        expired_at: form.value.expired_at || null,
-        status: form.value.status,
-      }
-      if (form.value.password) {
-        (data as any).password = form.value.password
-      }
-      await updateUser(editingUser.value.id, data)
-    } else {
-      await createUser({
-        email: form.value.email,
-        password: form.value.password,
-        traffic_limit: form.value.traffic_limit,
-        speed_limit_up: form.value.speed_limit_up,
-        speed_limit_down: form.value.speed_limit_down,
-        device_limit: form.value.device_limit,
-        expired_at: form.value.expired_at || null,
-        status: form.value.status,
-      })
-    }
-    showDialog.value = false
-    await fetchUsers()
-  } catch (err) {
-    console.error('±£´æÓÃ»§Ê§°Ü:', err)
-  } finally {
-    saving.value = false
+  if (isEdit.value) {
+    const data: any = { ...editingUser.value }
+    if (!data.password) delete data.password
+    await updateUser(editingUser.value.id!, data)
+  } else {
+    await createUser(editingUser.value as any)
   }
+  dialogOpen.value = false
+  fetchData()
 }
 
-function confirmDelete(user: User) {
-  deletingUser.value = user
-  showDeleteDialog.value = true
+function confirmDelete(u: User) {
+  editingUser.value = u
+  deleteDialogOpen.value = true
 }
 
 async function handleDelete() {
-  if (!deletingUser.value) return
-  try {
-    await deleteUser(deletingUser.value.id)
-    showDeleteDialog.value = false
-    deletingUser.value = null
-    await fetchUsers()
-  } catch (err) {
-    console.error('É¾³ıÓÃ»§Ê§°Ü:', err)
-  }
+  await deleteUser(editingUser.value.id!)
+  deleteDialogOpen.value = false
+  fetchData()
 }
 
-function goToPage(p: number) {
-  if (p >= 1 && p <= totalPages.value) {
-    page.value = p
-    fetchUsers()
-  }
-}
-
-function handleSearch() {
-  page.value = 1
-  fetchUsers()
-}
-
-onMounted(fetchUsers)
+onMounted(fetchData)
 </script>
 
 <template>
-  <div class="space-y-4">
-    <!-- ¶¥²¿²Ù×÷À¸ -->
-    <div class="flex items-center gap-2">
-      <div class="relative flex-1 max-w-sm">
-        <Search class="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
-        <Input
-          v-model="searchQuery"
-          placeholder="ËÑË÷ÓÃ»§..."
-          class="pl-8"
-          @keyup.enter="handleSearch"
-        />
-      </div>
-      <Button @click="openCreate">
-        <Plus class="size-4" />
-        ´´½¨ÓÃ»§
-      </Button>
+  <div class="space-y-6">
+    <div class="flex items-center justify-between">
+      <h1 class="text-2xl font-bold">ç”¨æˆ·ç®¡ç†</h1>
+      <Button @click="openCreate"><Plus class="mr-2 h-4 w-4" />åˆ›å»ºç”¨æˆ·</Button>
     </div>
+    <Card>
+      <CardHeader>
+        <div class="flex items-center gap-2">
+          <Input v-model="search" placeholder="æœç´¢é‚®ç®±..." class="w-64" @keyup.enter="fetchData" />
+          <Button variant="outline" @click="fetchData">æœç´¢</Button>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>ID</TableHead>
+              <TableHead>é‚®ç®±</TableHead>
+              <TableHead>UUID</TableHead>
+              <TableHead>æµé‡</TableHead>
+              <TableHead>é™é€Ÿ</TableHead>
+              <TableHead>çŠ¶æ€</TableHead>
+              <TableHead>åˆ°æœŸæ—¶é—´</TableHead>
+              <TableHead>æ“ä½œ</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            <TableRow v-for="u in users" :key="u.id">
+              <TableCell>{{ u.id }}</TableCell>
+              <TableCell>{{ u.email }}</TableCell>
+              <TableCell class="font-mono text-xs">{{ u.uuid.slice(0, 8) }}...</TableCell>
+              <TableCell>{{ formatBytes(u.traffic_used) }} / {{ u.traffic_limit ? formatBytes(u.traffic_limit) : 'ä¸é™' }}</TableCell>
+              <TableCell>{{ u.speed_limit_up || 0 }}/{{ u.speed_limit_down || 0 }} Mbps</TableCell>
+              <TableCell><Badge :variant="u.status === 1 ? 'default' : 'destructive'">{{ u.status === 1 ? 'å¯ç”¨' : 'ç¦ç”¨' }}</Badge></TableCell>
+              <TableCell>{{ u.expired_at || 'æ°¸ä¹…' }}</TableCell>
+              <TableCell>
+                <div class="flex gap-1">
+                  <Button variant="ghost" size="sm" @click="openEdit(u)"><Pencil class="h-4 w-4" /></Button>
+                  <Button variant="ghost" size="sm" @click="confirmDelete(u)"><Trash2 class="h-4 w-4 text-red-500" /></Button>
+                </div>
+              </TableCell>
+            </TableRow>
+          </TableBody>
+        </Table>
+        <div class="flex items-center justify-between mt-4">
+          <span class="text-sm text-muted-foreground">å…± {{ total }} æ¡</span>
+          <div class="flex gap-2">
+            <Button variant="outline" size="sm" :disabled="page <= 1" @click="page--; fetchData()">ä¸Šä¸€é¡µ</Button>
+            <span class="flex items-center text-sm">ç¬¬ {{ page }} é¡µ</span>
+            <Button variant="outline" size="sm" :disabled="page * pageSize >= total" @click="page++; fetchData()">ä¸‹ä¸€é¡µ</Button>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
 
-    <!-- ÓÃ»§±í¸ñ -->
-    <div class="rounded-lg border">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead class="w-16">ID</TableHead>
-            <TableHead>ÓÊÏä</TableHead>
-            <TableHead>UUID</TableHead>
-            <TableHead>Á÷Á¿</TableHead>
-            <TableHead>ÏŞËÙ</TableHead>
-            <TableHead>×´Ì¬</TableHead>
-            <TableHead>µ½ÆÚÊ±¼ä</TableHead>
-            <TableHead class="w-16">²Ù×÷</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          <TableRow v-if="loading">
-            <TableCell colspan="8" class="h-24 text-center text-muted-foreground">
-              ¼ÓÔØÖĞ...
-            </TableCell>
-          </TableRow>
-          <TableRow v-else-if="users.length === 0">
-            <TableCell colspan="8" class="h-24 text-center text-muted-foreground">
-              ÔİÎŞÊı¾İ
-            </TableCell>
-          </TableRow>
-          <TableRow v-for="user in users" :key="user.id">
-            <TableCell class="font-medium">{{ user.id }}</TableCell>
-            <TableCell>{{ user.email }}</TableCell>
-            <TableCell class="font-mono text-xs">
-              {{ user.uuid.slice(0, 8) }}...
-            </TableCell>
-            <TableCell>
-              {{ formatTraffic(user.traffic_used) }} / {{ formatTraffic(user.traffic_limit) }}
-            </TableCell>
-            <TableCell>
-              ¡ü{{ user.speed_limit_up || '¡Ş' }} ¡ı{{ user.speed_limit_down || '¡Ş' }}
-            </TableCell>
-            <TableCell>
-              <Badge :variant="user.status === 1 ? 'default' : 'destructive'">
-                {{ user.status === 1 ? 'Õı³£' : '½ûÓÃ' }}
-              </Badge>
-            </TableCell>
-            <TableCell>{{ formatDate(user.expired_at) }}</TableCell>
-            <TableCell>
-              <DropdownMenu>
-                <DropdownMenuTrigger as-child>
-                  <Button variant="ghost" size="icon-sm">
-                    <MoreHorizontal class="size-4" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent>
-                  <DropdownMenuItem @click="openEdit(user)">
-                    <Pencil class="size-4" />
-                    ±à¼­
-                  </DropdownMenuItem>
-                  <DropdownMenuItem @click="confirmDelete(user)" class="text-destructive">
-                    <Trash2 class="size-4" />
-                    É¾³ı
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </TableCell>
-          </TableRow>
-        </TableBody>
-      </Table>
-    </div>
-
-    <!-- ·ÖÒ³ -->
-    <div v-if="totalPages > 1" class="flex justify-center">
-      <nav class="flex items-center gap-1">
-        <Button variant="ghost" size="sm" :disabled="page <= 1" @click="goToPage(page - 1)">
-          ÉÏÒ»Ò³
-        </Button>
-        <Button
-          v-for="p in totalPages"
-          :key="p"
-          :variant="p === page ? 'outline' : 'ghost'"
-          size="sm"
-          @click="goToPage(p)"
-        >
-          {{ p }}
-        </Button>
-        <Button variant="ghost" size="sm" :disabled="page >= totalPages" @click="goToPage(page + 1)">
-          ÏÂÒ»Ò³
-        </Button>
-      </nav>
-    </div>
-
-    <!-- ´´½¨/±à¼­¶Ô»°¿ò -->
-    <Dialog v-model:open="showDialog">
-      <DialogContent class="sm:max-w-md">
+    <Dialog v-model:open="dialogOpen">
+      <DialogContent>
         <DialogHeader>
-          <DialogTitle>{{ editingUser ? '±à¼­ÓÃ»§' : '´´½¨ÓÃ»§' }}</DialogTitle>
-          <DialogDescription>
-            {{ editingUser ? 'ĞŞ¸ÄÓÃ»§ĞÅÏ¢' : 'ÌîĞ´ĞÂÓÃ»§ĞÅÏ¢' }}
-          </DialogDescription>
+          <DialogTitle>{{ isEdit ? 'ç¼–è¾‘ç”¨æˆ·' : 'åˆ›å»ºç”¨æˆ·' }}</DialogTitle>
+          <DialogDescription>{{ isEdit ? 'ä¿®æ”¹ç”¨æˆ·ä¿¡æ¯' : 'å¡«å†™ç”¨æˆ·ä¿¡æ¯åˆ›å»ºæ–°è´¦å·' }}</DialogDescription>
         </DialogHeader>
-        <form class="grid gap-4 py-4" @submit.prevent="handleSave">
-          <div class="grid gap-2">
-            <Label for="form-email">ÓÊÏä</Label>
-            <Input id="form-email" v-model="form.email" type="email" required />
+        <div class="grid gap-4 py-4">
+          <div class="grid gap-2"><Label>é‚®ç®±</Label><Input v-model="editingUser.email" /></div>
+          <div class="grid gap-2" v-if="!isEdit"><Label>å¯†ç </Label><Input v-model="editingUser.password" type="password" /></div>
+          <div class="grid gap-2"><Label>æµé‡ä¸Šé™ (å­—èŠ‚, 0=ä¸é™)</Label><Input v-model.number="editingUser.traffic_limit" type="number" /></div>
+          <div class="grid grid-cols-2 gap-2">
+            <div class="grid gap-2"><Label>ä¸Šè¡Œé™é€Ÿ (Mbps)</Label><Input v-model.number="editingUser.speed_limit_up" type="number" /></div>
+            <div class="grid gap-2"><Label>ä¸‹è¡Œé™é€Ÿ (Mbps)</Label><Input v-model.number="editingUser.speed_limit_down" type="number" /></div>
           </div>
-          <div class="grid gap-2">
-            <Label for="form-password">{{ editingUser ? 'ĞÂÃÜÂë£¨Áô¿Õ²»ĞŞ¸Ä£©' : 'ÃÜÂë' }}</Label>
-            <Input id="form-password" v-model="form.password" type="password" :required="!editingUser" />
-          </div>
-          <div class="grid grid-cols-2 gap-4">
-            <div class="grid gap-2">
-              <Label for="form-traffic">Á÷Á¿ÏŞÖÆ (×Ö½Ú)</Label>
-              <Input id="form-traffic" v-model.number="form.traffic_limit" type="number" />
-            </div>
-            <div class="grid gap-2">
-              <Label for="form-device">Éè±¸ÏŞÖÆ</Label>
-              <Input id="form-device" v-model.number="form.device_limit" type="number" />
-            </div>
-          </div>
-          <div class="grid grid-cols-2 gap-4">
-            <div class="grid gap-2">
-              <Label for="form-up">ÉÏĞĞÏŞËÙ</Label>
-              <Input id="form-up" v-model.number="form.speed_limit_up" type="number" />
-            </div>
-            <div class="grid gap-2">
-              <Label for="form-down">ÏÂĞĞÏŞËÙ</Label>
-              <Input id="form-down" v-model.number="form.speed_limit_down" type="number" />
-            </div>
-          </div>
-          <div class="grid grid-cols-2 gap-4">
-            <div class="grid gap-2">
-              <Label for="form-expired">µ½ÆÚÊ±¼ä</Label>
-              <Input id="form-expired" v-model="form.expired_at" type="date" />
-            </div>
-            <div class="grid gap-2">
-              <Label for="form-status">×´Ì¬</Label>
-              <select
-                id="form-status"
-                v-model.number="form.status"
-                class="border-input bg-background h-8 rounded-md border px-3 text-sm"
-              >
-                <option :value="1">Õı³£</option>
-                <option :value="0">½ûÓÃ</option>
-              </select>
-            </div>
-          </div>
-        </form>
-        <DialogFooter>
-          <Button variant="outline" @click="showDialog = false">È¡Ïû</Button>
-          <Button :disabled="saving" @click="handleSave">
-            {{ saving ? '±£´æÖĞ...' : '±£´æ' }}
-          </Button>
-        </DialogFooter>
+          <div class="grid gap-2"><Label>è®¾å¤‡é™åˆ¶ (0=ä¸é™)</Label><Input v-model.number="editingUser.device_limit" type="number" /></div>
+        </div>
+        <DialogFooter><Button @click="handleSave">ä¿å­˜</Button></DialogFooter>
       </DialogContent>
     </Dialog>
 
-    <!-- É¾³ıÈ·ÈÏ¶Ô»°¿ò -->
-    <Dialog v-model:open="showDeleteDialog">
-      <DialogContent class="sm:max-w-sm">
+    <Dialog v-model:open="deleteDialogOpen">
+      <DialogContent>
         <DialogHeader>
-          <DialogTitle>È·ÈÏÉ¾³ı</DialogTitle>
-          <DialogDescription>
-            È·¶¨ÒªÉ¾³ıÓÃ»§ <strong>{{ deletingUser?.email }}</strong> Âğ£¿´Ë²Ù×÷²»¿É³·Ïú¡£
-          </DialogDescription>
+          <DialogTitle>ç¡®è®¤åˆ é™¤</DialogTitle>
+          <DialogDescription>ç¡®å®šè¦åˆ é™¤ç”¨æˆ· {{ editingUser.email }} å—ï¼Ÿæ­¤æ“ä½œä¸å¯æ’¤é”€ã€‚</DialogDescription>
         </DialogHeader>
         <DialogFooter>
-          <Button variant="outline" @click="showDeleteDialog = false">È¡Ïû</Button>
-          <Button variant="destructive" @click="handleDelete">É¾³ı</Button>
+          <Button variant="outline" @click="deleteDialogOpen = false">å–æ¶ˆ</Button>
+          <Button variant="destructive" @click="handleDelete">åˆ é™¤</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

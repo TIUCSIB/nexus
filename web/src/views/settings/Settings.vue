@@ -1,123 +1,46 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { getSettings, updateSettings } from '@/api/settings'
 import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
-import { Save, Loader2 } from '@lucide/vue'
+import { toast } from 'vue-sonner'
+import { getSettings, updateSettings } from '@/api/settings'
 
 const settings = ref<Record<string, string>>({})
-const loading = ref(true)
-const saving = ref(false)
+const loading = ref(false)
 
-const settingGroups = [
-  {
-    title: 'Õ¾µãÉèÖÃ',
-    description: 'ÅäÖÃÕ¾µã»ù±¾ĞÅÏ¢',
-    fields: [
-      { key: 'site_name', label: 'Õ¾µãÃû³Æ', placeholder: 'Nexus' },
-      { key: 'site_description', label: 'Õ¾µãÃèÊö', placeholder: 'Nexus ¹ÜÀíÏµÍ³' },
-      { key: 'site_url', label: 'Õ¾µã URL', placeholder: 'https://example.com' },
-    ],
-  },
-  {
-    title: 'ÓÊ¼şÉèÖÃ',
-    description: 'ÅäÖÃ SMTP ÓÊ¼ş·şÎñ',
-    fields: [
-      { key: 'smtp_host', label: 'SMTP Ö÷»ú', placeholder: 'smtp.example.com' },
-      { key: 'smtp_port', label: 'SMTP ¶Ë¿Ú', placeholder: '587' },
-      { key: 'smtp_user', label: 'SMTP ÓÃ»§Ãû', placeholder: 'user@example.com' },
-      { key: 'smtp_password', label: 'SMTP ÃÜÂë', placeholder: '??????', type: 'password' },
-      { key: 'smtp_from', label: '·¢¼şÈËµØÖ·', placeholder: 'noreply@example.com' },
-    ],
-  },
-  {
-    title: '¶©ÔÄÉèÖÃ',
-    description: 'ÅäÖÃÓÃ»§¶©ÔÄÏà¹Ø²ÎÊı',
-    fields: [
-      { key: 'subscribe_path', label: '¶©ÔÄÂ·¾¶', placeholder: '/api/v1/subscribe' },
-      { key: 'default_traffic_limit', label: 'Ä¬ÈÏÁ÷Á¿ÏŞÖÆ (×Ö½Ú)', placeholder: '10737418240' },
-      { key: 'default_device_limit', label: 'Ä¬ÈÏÉè±¸ÏŞÖÆ', placeholder: '3' },
-    ],
-  },
-]
-
-async function fetchSettings() {
-  loading.value = true
-  try {
-    const res = await getSettings()
-    if (res.code === 0 && res.data) {
-      settings.value = res.data
-    }
-  } catch (err) {
-    console.error('»ñÈ¡ÉèÖÃÊ§°Ü:', err)
-  } finally {
-    loading.value = false
-  }
-}
+onMounted(async () => {
+  const res = await getSettings()
+  if (res.code === 0) settings.value = res.data
+})
 
 async function handleSave() {
-  saving.value = true
+  loading.value = true
   try {
-    await updateSettings(settings.value)
-  } catch (err) {
-    console.error('±£´æÉèÖÃÊ§°Ü:', err)
-  } finally {
-    saving.value = false
-  }
+    const res = await updateSettings(settings.value)
+    if (res.code === 0) toast.success('ä¿å­˜æˆåŠŸ')
+    else toast.error('ä¿å­˜å¤±è´¥: ' + res.message)
+  } finally { loading.value = false }
 }
-
-onMounted(fetchSettings)
 </script>
 
 <template>
   <div class="space-y-6">
     <div class="flex items-center justify-between">
-      <div>
-        <h2 class="text-lg font-semibold">ÏµÍ³ÉèÖÃ</h2>
-        <p class="text-sm text-muted-foreground">¹ÜÀíÄúµÄÏµÍ³ÅäÖÃ</p>
-      </div>
-      <Button :disabled="saving || loading" @click="handleSave">
-        <Loader2 v-if="saving" class="size-4 animate-spin" />
-        <Save v-else class="size-4" />
-        {{ saving ? '±£´æÖĞ...' : '±£´æÉèÖÃ' }}
-      </Button>
+      <h1 class="text-2xl font-bold">ç³»ç»Ÿè®¾ç½®</h1>
+      <Button @click="handleSave" :disabled="loading">{{ loading ? 'ä¿å­˜ä¸­...' : 'ä¿å­˜è®¾ç½®' }}</Button>
     </div>
-
-    <template v-if="loading">
-      <Card v-for="i in 3" :key="i">
-        <CardContent class="p-6">
-          <div class="space-y-4">
-            <div class="h-4 w-32 animate-pulse rounded bg-muted" />
-            <div class="h-4 w-48 animate-pulse rounded bg-muted" />
-            <div class="h-8 w-full animate-pulse rounded bg-muted" />
-          </div>
-        </CardContent>
-      </Card>
-    </template>
-
-    <template v-else>
-      <Card v-for="group in settingGroups" :key="group.title">
-        <CardHeader>
-          <CardTitle>{{ group.title }}</CardTitle>
-          <CardDescription>{{ group.description }}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div class="grid gap-4">
-            <div v-for="field in group.fields" :key="field.key" class="grid gap-2">
-              <Label :for="field.key">{{ field.label }}</Label>
-              <Input
-                :id="field.key"
-                v-model="settings[field.key]"
-                :type="field.type || 'text'"
-                :placeholder="field.placeholder"
-              />
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-    </template>
+    <Card>
+      <CardHeader><CardTitle>åŸºæœ¬è®¾ç½®</CardTitle></CardHeader>
+      <CardContent class="space-y-4">
+        <div class="grid gap-2" v-for="(_, key) in settings" :key="key">
+          <Label>{{ key }}</Label>
+          <Input v-model="settings[key]" />
+        </div>
+        <p v-if="Object.keys(settings).length === 0" class="text-muted-foreground">æš‚æ— ç³»ç»Ÿè®¾ç½®</p>
+      </CardContent>
+    </Card>
   </div>
 </template>

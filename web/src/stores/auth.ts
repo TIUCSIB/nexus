@@ -1,4 +1,4 @@
-﻿import { defineStore } from 'pinia'
+import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { login as loginApi } from '@/api/auth'
 

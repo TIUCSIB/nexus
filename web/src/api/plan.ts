@@ -1,4 +1,4 @@
-﻿import request from '@/utils/request'
+import request from '@/utils/request'
 import type { ApiResponse, PageResult, Plan } from '@/types'
 
 export const listPlans = (params?: { page?: number; page_size?: number }) =>

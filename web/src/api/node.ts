@@ -1,4 +1,4 @@
-﻿import request from '@/utils/request'
+import request from '@/utils/request'
 import type { ApiResponse, PageResult, Node } from '@/types'
 
 export const listNodes = (params?: { page?: number; page_size?: number }) =>

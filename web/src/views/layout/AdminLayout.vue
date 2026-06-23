@@ -1,54 +1,31 @@
 <script setup lang="ts">
-import { useRouter, useRoute } from 'vue-router'
+import { ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { useSidebar } from '@/components/ui/sidebar'
 import {
-  SidebarProvider,
-  Sidebar,
-  SidebarContent,
-  SidebarMenu,
-  SidebarMenuItem,
-  SidebarMenuButton,
-  SidebarGroup,
-  SidebarGroupLabel,
-  SidebarHeader,
-  SidebarFooter,
-  SidebarInset,
-  SidebarTrigger,
+  SidebarProvider, Sidebar, SidebarContent, SidebarHeader, SidebarFooter,
+  SidebarGroup, SidebarGroupLabel, SidebarMenu, SidebarMenuItem, SidebarMenuButton,
+  SidebarInset, SidebarTrigger
 } from '@/components/ui/sidebar'
-import { Separator } from '@/components/ui/separator'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
 import { Button } from '@/components/ui/button'
-import { Avatar, AvatarFallback } from '@/components/ui/avatar'
-import {
-  LayoutDashboard,
-  Users,
-  Package,
-  Server,
-  Settings,
-  LogOut,
-  ChevronsUpDown,
-} from '@lucide/vue'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { Separator } from '@/components/ui/separator'
+import { LayoutDashboard, Users, Package, Server, Settings, LogOut, PanelLeft } from 'lucide-vue-next'
 
 const router = useRouter()
-const route = useRoute()
 const authStore = useAuthStore()
+const { state } = useSidebar()
 
-const navItems = [
-  { name: '“«±Ì≈Ã', icon: LayoutDashboard, to: '/dashboard' },
-  { name: '”√ªßπ‹¿Ì', icon: Users, to: '/users' },
-  { name: 'Ã◊≤Õπ‹¿Ì', icon: Package, to: '/plans' },
-  { name: 'Ω⁄µ„π‹¿Ì', icon: Server, to: '/nodes' },
-  { name: '…Ë÷√', icon: Settings, to: '/settings' },
+const menuItems = [
+  { title: '‰ª™Ë°®Áõò', icon: LayoutDashboard, path: '/dashboard' },
+  { title: 'Áî®Êà∑ÁÆ°ÁêÜ', icon: Users, path: '/users' },
+  { title: 'Â•óÈ§êÁÆ°ÁêÜ', icon: Package, path: '/plans' },
+  { title: 'ËäÇÁÇπÁÆ°ÁêÜ', icon: Server, path: '/nodes' },
+  { title: 'Á≥ªÁªüËÆæÁΩÆ', icon: Settings, path: '/settings' },
 ]
 
-function handleLogout() {
+function logout() {
   authStore.logout()
   router.push('/login')
 }
@@ -56,89 +33,49 @@ function handleLogout() {
 
 <template>
   <SidebarProvider>
-    <Sidebar variant="inset">
-      <SidebarHeader>
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <SidebarMenuButton size="lg" as="div">
-              <div class="bg-primary text-primary-foreground flex size-8 items-center justify-center rounded-lg">
-                <Server class="size-4" />
-              </div>
-              <div class="grid flex-1 text-left text-sm leading-tight">
-                <span class="truncate font-semibold">Nexus</span>
-                <span class="truncate text-xs text-muted-foreground">π‹¿Ì∫ÛÃ®</span>
-              </div>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        </SidebarMenu>
+    <Sidebar collapsible="icon">
+      <SidebarHeader class="border-b p-4">
+        <div class="flex items-center gap-2 text-lg font-bold" v-if="state === 'expanded'">
+          <Server class="h-5 w-5" />
+          Nexus
+        </div>
+        <Server v-else class="h-5 w-5 mx-auto" />
       </SidebarHeader>
-
       <SidebarContent>
         <SidebarGroup>
-          <SidebarGroupLabel>µº∫Ω≤Àµ•</SidebarGroupLabel>
+          <SidebarGroupLabel v-if="state === 'expanded'">ÂØºËà™ËèúÂçï</SidebarGroupLabel>
           <SidebarMenu>
-            <SidebarMenuItem v-for="item in navItems" :key="item.to">
-              <SidebarMenuButton
-                as="a"
-                :tooltip="item.name"
-                :is-active="route.path === item.to"
-                @click="router.push(item.to)"
-              >
-                <component :is="item.icon" />
-                <span>{{ item.name }}</span>
+            <SidebarMenuItem v-for="item in menuItems" :key="item.path">
+              <SidebarMenuButton as-child>
+                <router-link :to="item.path" active-class="bg-accent text-accent-foreground">
+                  <component :is="item.icon" class="h-4 w-4" />
+                  <span v-if="state === 'expanded'">{{ item.title }}</span>
+                </router-link>
               </SidebarMenuButton>
             </SidebarMenuItem>
           </SidebarMenu>
         </SidebarGroup>
       </SidebarContent>
-
-      <SidebarFooter>
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <DropdownMenu>
-              <DropdownMenuTrigger as-child>
-                <SidebarMenuButton
-                  size="lg"
-                  class="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
-                >
-                  <Avatar class="h-8 w-8 rounded-lg">
-                    <AvatarFallback class="rounded-lg">
-                      {{ authStore.email.charAt(0).toUpperCase() }}
-                    </AvatarFallback>
-                  </Avatar>
-                  <div class="grid flex-1 text-left text-sm leading-tight">
-                    <span class="truncate font-semibold">{{ authStore.email }}</span>
-                    <span class="truncate text-xs text-muted-foreground">π‹¿Ì‘±</span>
-                  </div>
-                  <ChevronsUpDown class="ml-auto size-4" />
-                </SidebarMenuButton>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent
-                side="top"
-                class="w-(--reka-dropdown-menu-trigger-width)"
-              >
-                <DropdownMenuLabel>’À∫≈</DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem @click="handleLogout">
-                  <LogOut />
-                  ÕÀ≥ˆµ«¬º
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </SidebarMenuItem>
-        </SidebarMenu>
-      </SidebarFooter>
     </Sidebar>
 
     <SidebarInset>
-      <header class="flex h-12 shrink-0 items-center gap-2 border-b px-4">
-        <SidebarTrigger class="-ml-1" />
-        <Separator orientation="vertical" class="mr-2 h-4" />
-        <h1 class="text-sm font-medium">
-          {{ navItems.find(i => route.path === i.to)?.name || 'Nexus' }}
-        </h1>
+      <header class="flex h-14 items-center gap-2 border-b px-4">
+        <SidebarTrigger />
+        <Separator orientation="vertical" class="h-6" />
+        <div class="flex-1" />
+        <DropdownMenu>
+          <DropdownMenuTrigger as-child>
+            <Button variant="ghost" size="sm">{{ authStore.email }}</Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem @click="logout">
+              <LogOut class="mr-2 h-4 w-4" />
+              ÈÄÄÂá∫ÁôªÂΩï
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </header>
-      <main class="flex-1 p-4">
+      <main class="flex-1 p-6">
         <router-view />
       </main>
     </SidebarInset>

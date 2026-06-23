@@ -1,4 +1,4 @@
-﻿import request from '@/utils/request'
+import request from '@/utils/request'
 import type { ApiResponse, PageResult, User } from '@/types'
 
 export const listUsers = (params: { page?: number; page_size?: number; q?: string }) =>

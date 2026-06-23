@@ -1,330 +1,113 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
-import { listPlans, createPlan, updatePlan, deletePlan } from '@/api/plan'
-import type { Plan } from '@/types'
+import { ref, onMounted } from 'vue'
 import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
-import {
-  Pagination,
-  PaginationContent,
-  PaginationItem,
-  PaginationLink,
-  PaginationNext,
-  PaginationPrevious,
-} from '@/components/ui/pagination'
-import { Plus, MoreHorizontal, Pencil, Trash2 } from '@lucide/vue'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Plus, Pencil, Trash2 } from 'lucide-vue-next'
+import { listPlans, createPlan, updatePlan, deletePlan } from '@/api/plan'
+import type { Plan } from '@/types'
 
 const plans = ref<Plan[]>([])
 const total = ref(0)
 const page = ref(1)
-const pageSize = ref(20)
-const loading = ref(false)
+const dialogOpen = ref(false)
+const deleteDialogOpen = ref(false)
+const editing = ref<Partial<Plan>>({})
+const isEdit = ref(false)
 
-const showDialog = ref(false)
-const showDeleteDialog = ref(false)
-const editingPlan = ref<Plan | null>(null)
-const deletingPlan = ref<Plan | null>(null)
-const saving = ref(false)
-
-const form = ref({
-  name: '',
-  description: '',
-  traffic_limit: 0,
-  duration_days: 30,
-  price: 0,
-  sort: 0,
-  status: 1,
-})
-
-const totalPages = computed(() => Math.ceil(total.value / pageSize.value))
-
-function formatTraffic(bytes: number): string {
-  if (bytes >= 1073741824) {
-    return (bytes / 1073741824).toFixed(2) + ' GB'
-  }
-  if (bytes >= 1048576) {
-    return (bytes / 1048576).toFixed(2) + ' MB'
-  }
-  if (bytes === 0) return '²»ÏŞ'
-  return bytes + ' B'
+function formatTraffic(b: number) {
+  if (b === 0) return 'ä¸é™'
+  const k = 1024, s = ['B', 'KB', 'MB', 'GB', 'TB']
+  const i = Math.floor(Math.log(b) / Math.log(k))
+  return (b / Math.pow(k, i)).toFixed(1) + ' ' + s[i]
 }
 
-function formatPrice(price: number): string {
-  return '£¤' + (price / 100).toFixed(2)
+async function fetchData() {
+  const res = await listPlans({ page: page.value, page_size: 20 })
+  if (res.code === 0) { plans.value = res.data.items; total.value = res.data.total }
 }
 
-async function fetchPlans() {
-  loading.value = true
-  try {
-    const res = await listPlans({ page: page.value, page_size: pageSize.value })
-    if (res.code === 0 && res.data) {
-      plans.value = res.data.items
-      total.value = res.data.total
-    }
-  } catch (err) {
-    console.error('»ñÈ¡Ì×²ÍÁĞ±íÊ§°Ü:', err)
-  } finally {
-    loading.value = false
-  }
-}
-
-function openCreate() {
-  editingPlan.value = null
-  form.value = {
-    name: '',
-    description: '',
-    traffic_limit: 0,
-    duration_days: 30,
-    price: 0,
-    sort: 0,
-    status: 1,
-  }
-  showDialog.value = true
-}
-
-function openEdit(plan: Plan) {
-  editingPlan.value = plan
-  form.value = {
-    name: plan.name,
-    description: plan.description,
-    traffic_limit: plan.traffic_limit,
-    duration_days: plan.duration_days,
-    price: plan.price,
-    sort: plan.sort,
-    status: plan.status,
-  }
-  showDialog.value = true
-}
-
+function openCreate() { editing.value = { name: '', description: '', traffic_limit: 0, duration_days: 30, price: 0, status: 1 }; isEdit.value = false; dialogOpen.value = true }
+function openEdit(p: Plan) { editing.value = { ...p }; isEdit.value = true; dialogOpen.value = true }
 async function handleSave() {
-  saving.value = true
-  try {
-    if (editingPlan.value) {
-      await updatePlan(editingPlan.value.id, { ...form.value })
-    } else {
-      await createPlan({ ...form.value })
-    }
-    showDialog.value = false
-    await fetchPlans()
-  } catch (err) {
-    console.error('±£´æÌ×²ÍÊ§°Ü:', err)
-  } finally {
-    saving.value = false
-  }
+  isEdit.value ? await updatePlan(editing.value.id!, editing.value) : await createPlan(editing.value)
+  dialogOpen.value = false; fetchData()
 }
+function confirmDelete(p: Plan) { editing.value = p; deleteDialogOpen.value = true }
+async function handleDelete() { await deletePlan(editing.value.id!); deleteDialogOpen.value = false; fetchData() }
 
-function confirmDelete(plan: Plan) {
-  deletingPlan.value = plan
-  showDeleteDialog.value = true
-}
-
-async function handleDelete() {
-  if (!deletingPlan.value) return
-  try {
-    await deletePlan(deletingPlan.value.id)
-    showDeleteDialog.value = false
-    deletingPlan.value = null
-    await fetchPlans()
-  } catch (err) {
-    console.error('É¾³ıÌ×²ÍÊ§°Ü:', err)
-  }
-}
-
-function goToPage(p: number) {
-  if (p >= 1 && p <= totalPages.value) {
-    page.value = p
-    fetchPlans()
-  }
-}
-
-onMounted(fetchPlans)
+onMounted(fetchData)
 </script>
 
 <template>
-  <div class="space-y-4">
-    <!-- ¶¥²¿²Ù×÷À¸ -->
+  <div class="space-y-6">
     <div class="flex items-center justify-between">
-      <h2 class="text-lg font-semibold">Ì×²Í¹ÜÀí</h2>
-      <Button @click="openCreate">
-        <Plus class="size-4" />
-        ´´½¨Ì×²Í
-      </Button>
+      <h1 class="text-2xl font-bold">å¥—é¤ç®¡ç†</h1>
+      <Button @click="openCreate"><Plus class="mr-2 h-4 w-4" />åˆ›å»ºå¥—é¤</Button>
     </div>
+    <Card>
+      <CardHeader />
+      <CardContent>
+        <Table>
+          <TableHeader><TableRow>
+            <TableHead>ID</TableHead><TableHead>åç§°</TableHead><TableHead>æµé‡</TableHead>
+            <TableHead>æœ‰æ•ˆæœŸ</TableHead><TableHead>ä»·æ ¼(åˆ†)</TableHead><TableHead>çŠ¶æ€</TableHead><TableHead>æ“ä½œ</TableHead>
+          </TableRow></TableHeader>
+          <TableBody>
+            <TableRow v-for="p in plans" :key="p.id">
+              <TableCell>{{ p.id }}</TableCell>
+              <TableCell class="font-medium">{{ p.name }}</TableCell>
+              <TableCell>{{ formatTraffic(p.traffic_limit) }}</TableCell>
+              <TableCell>{{ p.duration_days }}å¤©</TableCell>
+              <TableCell>{{ (p.price / 100).toFixed(2) }}</TableCell>
+              <TableCell><Badge :variant="p.status === 1 ? 'default' : 'secondary'">{{ p.status === 1 ? 'ä¸Šæ¶' : 'ä¸‹æ¶' }}</Badge></TableCell>
+              <TableCell>
+                <div class="flex gap-1">
+                  <Button variant="ghost" size="sm" @click="openEdit(p)"><Pencil class="h-4 w-4" /></Button>
+                  <Button variant="ghost" size="sm" @click="confirmDelete(p)"><Trash2 class="h-4 w-4 text-red-500" /></Button>
+                </div>
+              </TableCell>
+            </TableRow>
+          </TableBody>
+        </Table>
+        <div class="flex items-center justify-between mt-4">
+          <span class="text-sm text-muted-foreground">å…± {{ total }} æ¡</span>
+          <div class="flex gap-2">
+            <Button variant="outline" size="sm" :disabled="page <= 1" @click="page--; fetchData()">ä¸Šä¸€é¡µ</Button>
+            <span class="flex items-center text-sm">ç¬¬ {{ page }} é¡µ</span>
+            <Button variant="outline" size="sm" :disabled="page * 20 >= total" @click="page++; fetchData()">ä¸‹ä¸€é¡µ</Button>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
 
-    <!-- Ì×²Í±í¸ñ -->
-    <div class="rounded-lg border">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead class="w-16">ID</TableHead>
-            <TableHead>Ãû³Æ</TableHead>
-            <TableHead>Á÷Á¿ÏŞÖÆ</TableHead>
-            <TableHead>Ê±³¤£¨Ìì£©</TableHead>
-            <TableHead>¼Û¸ñ</TableHead>
-            <TableHead>ÅÅĞò</TableHead>
-            <TableHead>×´Ì¬</TableHead>
-            <TableHead class="w-16">²Ù×÷</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          <TableRow v-if="loading">
-            <TableCell colspan="8" class="h-24 text-center text-muted-foreground">
-              ¼ÓÔØÖĞ...
-            </TableCell>
-          </TableRow>
-          <TableRow v-else-if="plans.length === 0">
-            <TableCell colspan="8" class="h-24 text-center text-muted-foreground">
-              ÔİÎŞÊı¾İ
-            </TableCell>
-          </TableRow>
-          <TableRow v-for="plan in plans" :key="plan.id">
-            <TableCell class="font-medium">{{ plan.id }}</TableCell>
-            <TableCell>{{ plan.name }}</TableCell>
-            <TableCell>{{ formatTraffic(plan.traffic_limit) }}</TableCell>
-            <TableCell>{{ plan.duration_days }}</TableCell>
-            <TableCell>{{ formatPrice(plan.price) }}</TableCell>
-            <TableCell>{{ plan.sort }}</TableCell>
-            <TableCell>
-              <Badge :variant="plan.status === 1 ? 'default' : 'destructive'">
-                {{ plan.status === 1 ? 'ÉÏ¼Ü' : 'ÏÂ¼Ü' }}
-              </Badge>
-            </TableCell>
-            <TableCell>
-              <DropdownMenu>
-                <DropdownMenuTrigger as-child>
-                  <Button variant="ghost" size="icon-sm">
-                    <MoreHorizontal class="size-4" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent>
-                  <DropdownMenuItem @click="openEdit(plan)">
-                    <Pencil class="size-4" />
-                    ±à¼­
-                  </DropdownMenuItem>
-                  <DropdownMenuItem @click="confirmDelete(plan)" class="text-destructive">
-                    <Trash2 class="size-4" />
-                    É¾³ı
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </TableCell>
-          </TableRow>
-        </TableBody>
-      </Table>
-    </div>
-
-    <!-- ·ÖÒ³ -->
-    <Pagination v-if="totalPages > 1" :total="total" :items-per-page="pageSize" :page="page" @update:page="goToPage">
-      <PaginationContent>
-        <PaginationItem>
-          <PaginationPrevious @click="goToPage(page - 1)" />
-        </PaginationItem>
-        <PaginationItem v-for="p in totalPages" :key="p">
-          <PaginationLink :is-active="p === page" @click="goToPage(p)">
-            {{ p }}
-          </PaginationLink>
-        </PaginationItem>
-        <PaginationItem>
-          <PaginationNext @click="goToPage(page + 1)" />
-        </PaginationItem>
-      </PaginationContent>
-    </Pagination>
-
-    <!-- ´´½¨/±à¼­¶Ô»°¿ò -->
-    <Dialog v-model:open="showDialog">
-      <DialogContent class="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>{{ editingPlan ? '±à¼­Ì×²Í' : '´´½¨Ì×²Í' }}</DialogTitle>
-          <DialogDescription>
-            {{ editingPlan ? 'ĞŞ¸ÄÌ×²ÍĞÅÏ¢' : 'ÌîĞ´ĞÂÌ×²ÍĞÅÏ¢' }}
-          </DialogDescription>
-        </DialogHeader>
-        <form class="grid gap-4 py-4" @submit.prevent="handleSave">
-          <div class="grid gap-2">
-            <Label for="plan-name">Ãû³Æ</Label>
-            <Input id="plan-name" v-model="form.name" required />
+    <Dialog v-model:open="dialogOpen">
+      <DialogContent>
+        <DialogHeader><DialogTitle>{{ isEdit ? 'ç¼–è¾‘å¥—é¤' : 'åˆ›å»ºå¥—é¤' }}</DialogTitle></DialogHeader>
+        <div class="grid gap-4 py-4">
+          <div class="grid gap-2"><Label>åç§°</Label><Input v-model="editing.name" /></div>
+          <div class="grid gap-2"><Label>æè¿°</Label><Input v-model="editing.description" /></div>
+          <div class="grid grid-cols-2 gap-2">
+            <div class="grid gap-2"><Label>æµé‡ä¸Šé™(å­—èŠ‚)</Label><Input v-model.number="editing.traffic_limit" type="number" /></div>
+            <div class="grid gap-2"><Label>æœ‰æ•ˆå¤©æ•°</Label><Input v-model.number="editing.duration_days" type="number" /></div>
           </div>
-          <div class="grid gap-2">
-            <Label for="plan-desc">ÃèÊö</Label>
-            <Input id="plan-desc" v-model="form.description" />
-          </div>
-          <div class="grid grid-cols-2 gap-4">
-            <div class="grid gap-2">
-              <Label for="plan-traffic">Á÷Á¿ÏŞÖÆ (×Ö½Ú)</Label>
-              <Input id="plan-traffic" v-model.number="form.traffic_limit" type="number" />
-            </div>
-            <div class="grid gap-2">
-              <Label for="plan-duration">Ê±³¤£¨Ìì£©</Label>
-              <Input id="plan-duration" v-model.number="form.duration_days" type="number" />
-            </div>
-          </div>
-          <div class="grid grid-cols-2 gap-4">
-            <div class="grid gap-2">
-              <Label for="plan-price">¼Û¸ñ£¨·Ö£©</Label>
-              <Input id="plan-price" v-model.number="form.price" type="number" />
-            </div>
-            <div class="grid gap-2">
-              <Label for="plan-sort">ÅÅĞò</Label>
-              <Input id="plan-sort" v-model.number="form.sort" type="number" />
-            </div>
-          </div>
-          <div class="grid gap-2">
-            <Label for="plan-status">×´Ì¬</Label>
-            <select
-              id="plan-status"
-              v-model.number="form.status"
-              class="border-input bg-background h-8 rounded-md border px-3 text-sm"
-            >
-              <option :value="1">ÉÏ¼Ü</option>
-              <option :value="0">ÏÂ¼Ü</option>
-            </select>
-          </div>
-        </form>
-        <DialogFooter>
-          <Button variant="outline" @click="showDialog = false">È¡Ïû</Button>
-          <Button :disabled="saving" @click="handleSave">
-            {{ saving ? '±£´æÖĞ...' : '±£´æ' }}
-          </Button>
-        </DialogFooter>
+          <div class="grid gap-2"><Label>ä»·æ ¼(åˆ†)</Label><Input v-model.number="editing.price" type="number" /></div>
+        </div>
+        <DialogFooter><Button @click="handleSave">ä¿å­˜</Button></DialogFooter>
       </DialogContent>
     </Dialog>
 
-    <!-- É¾³ıÈ·ÈÏ¶Ô»°¿ò -->
-    <Dialog v-model:open="showDeleteDialog">
-      <DialogContent class="sm:max-w-sm">
-        <DialogHeader>
-          <DialogTitle>È·ÈÏÉ¾³ı</DialogTitle>
-          <DialogDescription>
-            È·¶¨ÒªÉ¾³ıÌ×²Í <strong>{{ deletingPlan?.name }}</strong> Âğ£¿´Ë²Ù×÷²»¿É³·Ïú¡£
-          </DialogDescription>
-        </DialogHeader>
+    <Dialog v-model:open="deleteDialogOpen">
+      <DialogContent>
+        <DialogHeader><DialogTitle>ç¡®è®¤åˆ é™¤</DialogTitle></DialogHeader>
+        <DialogDescription>ç¡®å®šè¦åˆ é™¤å¥—é¤ "{{ editing.name }}" å—ï¼Ÿ</DialogDescription>
         <DialogFooter>
-          <Button variant="outline" @click="showDeleteDialog = false">È¡Ïû</Button>
-          <Button variant="destructive" @click="handleDelete">É¾³ı</Button>
+          <Button variant="outline" @click="deleteDialogOpen = false">å–æ¶ˆ</Button>
+          <Button variant="destructive" @click="handleDelete">åˆ é™¤</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

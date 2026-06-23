@@ -1,388 +1,130 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
-import { listNodes, createNode, updateNode, deleteNode, restartNode } from '@/api/node'
-import type { Node } from '@/types'
+import { ref, onMounted } from 'vue'
 import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
-import {
-  Pagination,
-  PaginationContent,
-  PaginationItem,
-  PaginationLink,
-  PaginationNext,
-  PaginationPrevious,
-} from '@/components/ui/pagination'
-import { Plus, MoreHorizontal, Pencil, Trash2, RotateCw } from '@lucide/vue'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Plus, Pencil, Trash2, RotateCcw } from 'lucide-vue-next'
+import { listNodes, createNode, updateNode, deleteNode, restartNode } from '@/api/node'
+import type { Node } from '@/types'
 
 const nodes = ref<Node[]>([])
 const total = ref(0)
 const page = ref(1)
-const pageSize = ref(20)
-const loading = ref(false)
-const restartingId = ref<number | null>(null)
+const dialogOpen = ref(false)
+const deleteDialogOpen = ref(false)
+const editing = ref<Partial<Node>>({})
+const isEdit = ref(false)
 
-const showDialog = ref(false)
-const showDeleteDialog = ref(false)
-const editingNode = ref<Node | null>(null)
-const deletingNode = ref<Node | null>(null)
-const saving = ref(false)
-
-const form = ref({
-  name: '',
-  address: '',
-  protocol: 'vless',
-  port: 443,
-  config_mode: 'auto',
-  config_json: '',
-  sort: 0,
-  status: 1,
-})
-
-const totalPages = computed(() => Math.ceil(total.value / pageSize.value))
-
-function formatDate(dateStr: string | null): string {
-  if (!dateStr) return '-'
-  return new Date(dateStr).toLocaleString('zh-CN')
+async function fetchData() {
+  const res = await listNodes({ page: page.value, page_size: 20 })
+  if (res.code === 0) { nodes.value = res.data.items; total.value = res.data.total }
 }
 
-async function fetchNodes() {
-  loading.value = true
-  try {
-    const res = await listNodes({ page: page.value, page_size: pageSize.value })
-    if (res.code === 0 && res.data) {
-      nodes.value = res.data.items
-      total.value = res.data.total
-    }
-  } catch (err) {
-    console.error('»ñÈ¡½ÚµãÁĞ±íÊ§°Ü:', err)
-  } finally {
-    loading.value = false
-  }
-}
-
-function openCreate() {
-  editingNode.value = null
-  form.value = {
-    name: '',
-    address: '',
-    protocol: 'vless',
-    port: 443,
-    config_mode: 'auto',
-    config_json: '',
-    sort: 0,
-    status: 1,
-  }
-  showDialog.value = true
-}
-
-function openEdit(node: Node) {
-  editingNode.value = node
-  form.value = {
-    name: node.name,
-    address: node.address,
-    protocol: node.protocol,
-    port: node.port,
-    config_mode: node.config_mode,
-    config_json: node.config_json,
-    sort: node.sort,
-    status: node.status,
-  }
-  showDialog.value = true
-}
-
+function openCreate() { editing.value = { name: '', address: '', protocol: 'vless', port: 443, config_mode: 'auto', status: 1 }; isEdit.value = false; dialogOpen.value = true }
+function openEdit(n: Node) { editing.value = { ...n }; isEdit.value = true; dialogOpen.value = true }
 async function handleSave() {
-  saving.value = true
-  try {
-    if (editingNode.value) {
-      await updateNode(editingNode.value.id, { ...form.value })
-    } else {
-      await createNode({ ...form.value })
-    }
-    showDialog.value = false
-    await fetchNodes()
-  } catch (err) {
-    console.error('±£´æ½ÚµãÊ§°Ü:', err)
-  } finally {
-    saving.value = false
-  }
+  isEdit.value ? await updateNode(editing.value.id!, editing.value) : await createNode(editing.value)
+  dialogOpen.value = false; fetchData()
 }
+function confirmDelete(n: Node) { editing.value = n; deleteDialogOpen.value = true }
+async function handleDelete() { await deleteNode(editing.value.id!); deleteDialogOpen.value = false; fetchData() }
+async function handleRestart(id: number) { await restartNode(id) }
 
-function confirmDelete(node: Node) {
-  deletingNode.value = node
-  showDeleteDialog.value = true
-}
-
-async function handleDelete() {
-  if (!deletingNode.value) return
-  try {
-    await deleteNode(deletingNode.value.id)
-    showDeleteDialog.value = false
-    deletingNode.value = null
-    await fetchNodes()
-  } catch (err) {
-    console.error('É¾³ı½ÚµãÊ§°Ü:', err)
-  }
-}
-
-async function handleRestart(id: number) {
-  restartingId.value = id
-  try {
-    await restartNode(id)
-  } catch (err) {
-    console.error('ÖØÆô½ÚµãÊ§°Ü:', err)
-  } finally {
-    restartingId.value = null
-  }
-}
-
-function goToPage(p: number) {
-  if (p >= 1 && p <= totalPages.value) {
-    page.value = p
-    fetchNodes()
-  }
-}
-
-onMounted(fetchNodes)
+onMounted(fetchData)
 </script>
 
 <template>
-  <div class="space-y-4">
-    <!-- ¶¥²¿²Ù×÷À¸ -->
+  <div class="space-y-6">
     <div class="flex items-center justify-between">
-      <h2 class="text-lg font-semibold">½Úµã¹ÜÀí</h2>
-      <Button @click="openCreate">
-        <Plus class="size-4" />
-        ´´½¨½Úµã
-      </Button>
+      <h1 class="text-2xl font-bold">èŠ‚ç‚¹ç®¡ç†</h1>
+      <Button @click="openCreate"><Plus class="mr-2 h-4 w-4" />åˆ›å»ºèŠ‚ç‚¹</Button>
     </div>
-
-    <!-- ½Úµã±í¸ñ -->
-    <div class="rounded-lg border">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead class="w-16">ID</TableHead>
-            <TableHead>Ãû³Æ</TableHead>
-            <TableHead>µØÖ·</TableHead>
-            <TableHead>Ğ­Òé</TableHead>
-            <TableHead>¶Ë¿Ú</TableHead>
-            <TableHead>ÅäÖÃÄ£Ê½</TableHead>
-            <TableHead>ÔÚÏß</TableHead>
-            <TableHead>×´Ì¬</TableHead>
-            <TableHead class="w-24">²Ù×÷</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          <TableRow v-if="loading">
-            <TableCell colspan="9" class="h-24 text-center text-muted-foreground">
-              ¼ÓÔØÖĞ...
-            </TableCell>
-          </TableRow>
-          <TableRow v-else-if="nodes.length === 0">
-            <TableCell colspan="9" class="h-24 text-center text-muted-foreground">
-              ÔİÎŞÊı¾İ
-            </TableCell>
-          </TableRow>
-          <TableRow v-for="node in nodes" :key="node.id">
-            <TableCell class="font-medium">{{ node.id }}</TableCell>
-            <TableCell>{{ node.name }}</TableCell>
-            <TableCell class="font-mono text-xs">{{ node.address }}</TableCell>
-            <TableCell>
-              <Badge variant="outline">{{ node.protocol }}</Badge>
-            </TableCell>
-            <TableCell>{{ node.port }}</TableCell>
-            <TableCell>{{ node.config_mode }}</TableCell>
-            <TableCell>
-              <Badge :variant="node.online ? 'default' : 'destructive'" class="gap-1">
-                <span :class="['size-1.5 rounded-full', node.online ? 'bg-green-500' : 'bg-red-500']" />
-                {{ node.online ? 'ÔÚÏß' : 'ÀëÏß' }}
-              </Badge>
-            </TableCell>
-            <TableCell>
-              <Badge :variant="node.status === 1 ? 'default' : 'destructive'">
-                {{ node.status === 1 ? 'ÆôÓÃ' : '½ûÓÃ' }}
-              </Badge>
-            </TableCell>
-            <TableCell>
-              <div class="flex items-center gap-1">
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  :disabled="restartingId === node.id"
-                  @click="handleRestart(node.id)"
-                >
-                  <RotateCw :class="['size-4', restartingId === node.id && 'animate-spin']" />
-                </Button>
-                <DropdownMenu>
-                  <DropdownMenuTrigger as-child>
-                    <Button variant="ghost" size="icon-sm">
-                      <MoreHorizontal class="size-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent>
-                    <DropdownMenuItem @click="openEdit(node)">
-                      <Pencil class="size-4" />
-                      ±à¼­
-                    </DropdownMenuItem>
-                    <DropdownMenuItem @click="confirmDelete(node)" class="text-destructive">
-                      <Trash2 class="size-4" />
-                      É¾³ı
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
-            </TableCell>
-          </TableRow>
-        </TableBody>
-      </Table>
-    </div>
-
-    <!-- ·ÖÒ³ -->
-    <Pagination v-if="totalPages > 1" :total="total" :items-per-page="pageSize" :page="page" @update:page="goToPage">
-      <PaginationContent>
-        <PaginationItem>
-          <PaginationPrevious @click="goToPage(page - 1)" />
-        </PaginationItem>
-        <PaginationItem v-for="p in totalPages" :key="p">
-          <PaginationLink :is-active="p === page" @click="goToPage(p)">
-            {{ p }}
-          </PaginationLink>
-        </PaginationItem>
-        <PaginationItem>
-          <PaginationNext @click="goToPage(page + 1)" />
-        </PaginationItem>
-      </PaginationContent>
-    </Pagination>
-
-    <!-- ´´½¨/±à¼­¶Ô»°¿ò -->
-    <Dialog v-model:open="showDialog">
-      <DialogContent class="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>{{ editingNode ? '±à¼­½Úµã' : '´´½¨½Úµã' }}</DialogTitle>
-          <DialogDescription>
-            {{ editingNode ? 'ĞŞ¸Ä½ÚµãĞÅÏ¢' : 'ÌîĞ´ĞÂ½ÚµãĞÅÏ¢' }}
-          </DialogDescription>
-        </DialogHeader>
-        <form class="grid gap-4 py-4" @submit.prevent="handleSave">
-          <div class="grid gap-2">
-            <Label for="node-name">Ãû³Æ</Label>
-            <Input id="node-name" v-model="form.name" required />
+    <Card>
+      <CardHeader />
+      <CardContent>
+        <Table>
+          <TableHeader><TableRow>
+            <TableHead>ID</TableHead><TableHead>åç§°</TableHead><TableHead>åœ°å€</TableHead>
+            <TableHead>åè®®</TableHead><TableHead>ç«¯å£</TableHead><TableHead>æ¨¡å¼</TableHead>
+            <TableHead>åœ¨çº¿</TableHead><TableHead>çŠ¶æ€</TableHead><TableHead>æ“ä½œ</TableHead>
+          </TableRow></TableHeader>
+          <TableBody>
+            <TableRow v-for="n in nodes" :key="n.id">
+              <TableCell>{{ n.id }}</TableCell>
+              <TableCell class="font-medium">{{ n.name }}</TableCell>
+              <TableCell>{{ n.address }}</TableCell>
+              <TableCell><Badge variant="outline">{{ n.protocol }}</Badge></TableCell>
+              <TableCell>{{ n.port }}</TableCell>
+              <TableCell>{{ n.config_mode === 'auto' ? 'è‡ªåŠ¨' : 'æ‰‹åŠ¨' }}</TableCell>
+              <TableCell><Badge :variant="n.online ? 'default' : 'destructive'">{{ n.online ? 'åœ¨çº¿' : 'ç¦»çº¿' }}</Badge></TableCell>
+              <TableCell><Badge :variant="n.status === 1 ? 'default' : 'secondary'">{{ n.status === 1 ? 'å¯ç”¨' : 'ç¦ç”¨' }}</Badge></TableCell>
+              <TableCell>
+                <div class="flex gap-1">
+                  <Button variant="ghost" size="sm" @click="handleRestart(n.id)"><RotateCcw class="h-4 w-4" /></Button>
+                  <Button variant="ghost" size="sm" @click="openEdit(n)"><Pencil class="h-4 w-4" /></Button>
+                  <Button variant="ghost" size="sm" @click="confirmDelete(n)"><Trash2 class="h-4 w-4 text-red-500" /></Button>
+                </div>
+              </TableCell>
+            </TableRow>
+          </TableBody>
+        </Table>
+        <div class="flex items-center justify-between mt-4">
+          <span class="text-sm text-muted-foreground">å…± {{ total }} æ¡</span>
+          <div class="flex gap-2">
+            <Button variant="outline" size="sm" :disabled="page <= 1" @click="page--; fetchData()">ä¸Šä¸€é¡µ</Button>
+            <span class="flex items-center text-sm">ç¬¬ {{ page }} é¡µ</span>
+            <Button variant="outline" size="sm" :disabled="page * 20 >= total" @click="page++; fetchData()">ä¸‹ä¸€é¡µ</Button>
           </div>
-          <div class="grid gap-2">
-            <Label for="node-address">µØÖ·</Label>
-            <Input id="node-address" v-model="form.address" placeholder="example.com" required />
-          </div>
-          <div class="grid grid-cols-2 gap-4">
+        </div>
+      </CardContent>
+    </Card>
+
+    <Dialog v-model:open="dialogOpen">
+      <DialogContent>
+        <DialogHeader><DialogTitle>{{ isEdit ? 'ç¼–è¾‘èŠ‚ç‚¹' : 'åˆ›å»ºèŠ‚ç‚¹' }}</DialogTitle></DialogHeader>
+        <div class="grid gap-4 py-4">
+          <div class="grid gap-2"><Label>åç§°</Label><Input v-model="editing.name" placeholder="ä¸œäº¬-01" /></div>
+          <div class="grid gap-2"><Label>åœ°å€</Label><Input v-model="editing.address" placeholder="0.0.0.0" /></div>
+          <div class="grid grid-cols-2 gap-2">
             <div class="grid gap-2">
-              <Label>Ğ­Òé</Label>
-              <Select v-model="form.protocol">
-                <SelectTrigger class="w-full">
-                  <SelectValue placeholder="Ñ¡ÔñĞ­Òé" />
-                </SelectTrigger>
+              <Label>åè®®</Label>
+              <Select v-model="editing.protocol"><SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="vless">vless</SelectItem>
-                  <SelectItem value="hysteria2">hysteria2</SelectItem>
-                  <SelectItem value="tuic">tuic</SelectItem>
+                  <SelectItem value="vless">VLESS</SelectItem>
+                  <SelectItem value="hysteria2">Hysteria2</SelectItem>
+                  <SelectItem value="tuic">TUIC</SelectItem>
                 </SelectContent>
               </Select>
             </div>
-            <div class="grid gap-2">
-              <Label for="node-port">¶Ë¿Ú</Label>
-              <Input id="node-port" v-model.number="form.port" type="number" />
-            </div>
-          </div>
-          <div class="grid grid-cols-2 gap-4">
-            <div class="grid gap-2">
-              <Label>ÅäÖÃÄ£Ê½</Label>
-              <Select v-model="form.config_mode">
-                <SelectTrigger class="w-full">
-                  <SelectValue placeholder="Ñ¡ÔñÄ£Ê½" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="auto">×Ô¶¯</SelectItem>
-                  <SelectItem value="manual">ÊÖ¶¯</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div class="grid gap-2">
-              <Label for="node-sort">ÅÅĞò</Label>
-              <Input id="node-sort" v-model.number="form.sort" type="number" />
-            </div>
+            <div class="grid gap-2"><Label>ç«¯å£</Label><Input v-model.number="editing.port" type="number" /></div>
           </div>
           <div class="grid gap-2">
-            <Label for="node-config">ÅäÖÃ JSON</Label>
-            <textarea
-              id="node-config"
-              v-model="form.config_json"
-              rows="4"
-              class="border-input bg-background placeholder:text-muted-foreground rounded-md border px-3 py-2 text-sm"
-              placeholder='{"key": "value"}'
-            />
+            <Label>é…ç½®æ¨¡å¼</Label>
+            <Select v-model="editing.config_mode"><SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="auto">è‡ªåŠ¨ï¼ˆè¡¨å•é…ç½®ï¼‰</SelectItem>
+                <SelectItem value="manual">æ‰‹åŠ¨ï¼ˆJSON é…ç½®ï¼‰</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
-          <div class="grid gap-2">
-            <Label for="node-status">×´Ì¬</Label>
-            <select
-              id="node-status"
-              v-model.number="form.status"
-              class="border-input bg-background h-8 rounded-md border px-3 text-sm"
-            >
-              <option :value="1">ÆôÓÃ</option>
-              <option :value="0">½ûÓÃ</option>
-            </select>
-          </div>
-        </form>
-        <DialogFooter>
-          <Button variant="outline" @click="showDialog = false">È¡Ïû</Button>
-          <Button :disabled="saving" @click="handleSave">
-            {{ saving ? '±£´æÖĞ...' : '±£´æ' }}
-          </Button>
-        </DialogFooter>
+          <div class="grid gap-2"><Label>é…ç½® JSON</Label><Input v-model="editing.config_json" placeholder='{}' /></div>
+        </div>
+        <DialogFooter><Button @click="handleSave">ä¿å­˜</Button></DialogFooter>
       </DialogContent>
     </Dialog>
 
-    <!-- É¾³ıÈ·ÈÏ¶Ô»°¿ò -->
-    <Dialog v-model:open="showDeleteDialog">
-      <DialogContent class="sm:max-w-sm">
-        <DialogHeader>
-          <DialogTitle>È·ÈÏÉ¾³ı</DialogTitle>
-          <DialogDescription>
-            È·¶¨ÒªÉ¾³ı½Úµã <strong>{{ deletingNode?.name }}</strong> Âğ£¿´Ë²Ù×÷²»¿É³·Ïú¡£
-          </DialogDescription>
-        </DialogHeader>
+    <Dialog v-model:open="deleteDialogOpen">
+      <DialogContent>
+        <DialogHeader><DialogTitle>ç¡®è®¤åˆ é™¤</DialogTitle></DialogHeader>
+        <DialogDescription>ç¡®å®šè¦åˆ é™¤èŠ‚ç‚¹ "{{ editing.name }}" å—ï¼Ÿ</DialogDescription>
         <DialogFooter>
-          <Button variant="outline" @click="showDeleteDialog = false">È¡Ïû</Button>
-          <Button variant="destructive" @click="handleDelete">É¾³ı</Button>
+          <Button variant="outline" @click="deleteDialogOpen = false">å–æ¶ˆ</Button>
+          <Button variant="destructive" @click="handleDelete">åˆ é™¤</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
