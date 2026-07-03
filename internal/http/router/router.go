@@ -108,6 +108,9 @@ func Setup() *gin.Engine {
 	}
 
 
+	// Serve static assets (JS, CSS, etc.)
+	r.Static("/assets", "./web/dist/assets")
+
 	// SPA catch-all闁挎稒鑹鹃幃鎾诲籍鐠轰警妲遍柣鐐叉閻楀鎹勯姘辩獮妤犵偞褰冮崳锝夊冀閻撳海纭€闁汇劌瀚褰掓⒓閸涘瓨鎳犻柟?	// 濞撴艾顑呴々褔鏁?{sub_path}/{token} -> /s/f034db92-8d33-4952-9cd5-2fe01669a379
 	r.NoRoute(func(c *gin.Context) {
 		if c.Request.Method != "GET" {
