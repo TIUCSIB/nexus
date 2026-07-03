@@ -1,6 +1,6 @@
 #!/bin/bash
 # Nexus Panel Installer
-# Usage: bash <(curl -fsSL https://raw.githubusercontent.com/TIUCSIB/nexus/main/scripts/install-panel.sh)
+# Usage: bash <(curl -fsSL URL) [--port 6100] [--dir /opt/nexus]
 set -e
 
 red='\033[0;31m'
@@ -12,6 +12,15 @@ plain='\033[0m'
 cur_dir=$(pwd)
 install_dir="/opt/nexus"
 github_repo="TIUCSIB/nexus"
+port=6100
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --port)  port="$2"; shift 2 ;;
+        --dir)   install_dir="$2"; shift 2 ;;
+        *)       shift ;;
+    esac
+done
 
 [[ $EUID -ne 0 ]] && echo -e "${red}Error: must run as root!${plain}" && exit 1
 
@@ -34,6 +43,7 @@ echo -e "${cyan}       Nexus Panel Installer            ${plain}"
 echo -e "${cyan}========================================${plain}"
 echo -e "  OS:     ${green}${release}${plain}"
 echo -e "  Arch:   ${green}${arch}${plain}"
+echo -e "  Port:   ${green}${port}${plain}"
 echo -e "  Dir:    ${green}${install_dir}${plain}"
 echo ""
 
@@ -102,7 +112,7 @@ app:
   secret_key: "${sk}"
 server:
   host: "0.0.0.0"
-  port: 6100
+  port: ${port}
 database:
   driver: "sqlite"
   dsn: "data/nexus.db"
@@ -119,9 +129,10 @@ payment:
   enabled: false
   gateways: []
 EOF
-        echo -e "  Config: ${green}created${plain}"
+        echo -e "  Config: ${green}created (port ${port})${plain}"
     else
-        echo -e "  Config: ${yellow}exists${plain}"
+        echo -e "  Config: ${yellow}exists, updating port...${plain}"
+        sed -i "s/^  port:.*/  port: ${port}/" "${install_dir}/config.yaml"
     fi
 }
 
@@ -186,18 +197,16 @@ if [[ x"${release}" == x"alpine" ]]; then service nexus start 2>/dev/null
 else systemctl start nexus 2>/dev/null; fi
 sleep 1
 
-ip=$(curl -s4 ifconfig.me 2>/dev/null || curl -s ip.sb 2>/dev/null || echo "YOUR_IP")
-port=$(grep 'port:' "${install_dir}/config.yaml" | awk '{print $2}' | tr -d '"' | head -1)
-[[ -z "${port}" ]] && port=6100
+server_ip=$(curl -s4 ifconfig.me 2>/dev/null || curl -s ip.sb 2>/dev/null || echo "YOUR_IP")
 
 echo ""
 echo -e "${green}========================================${plain}"
 echo -e "${green}  Nexus Panel installed successfully!   ${plain}"
 echo -e "${green}========================================${plain}"
 echo ""
-echo -e "  URL:     ${cyan}http://${ip}:${port}${plain}"
+echo -e "  URL:     ${cyan}http://${server_ip}:${port}${plain}"
 echo -e "  Login:   ${yellow}admin@nexus.com / 12345678${plain}"
-echo -e ""
+echo ""
 echo -e "  systemctl start/stop/restart nexus"
 echo -e "  journalctl -u nexus -f"
 echo ""
