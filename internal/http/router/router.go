@@ -107,8 +107,6 @@ func Setup() *gin.Engine {
 		admin.GET("/traffic-logs", handler.AdminListTrafficLogs)
 	}
 
-	// 闁告柣鍔嶉埀顑挎祰椤撳綊姊奸崨鎵唴闁汇垺鍞荤槐姗漃I 闁哄秶鍘х槐锟犳晬婢舵稓绐?api/{sub_path}/{format} 闁?/api/{sub_path}/{token}
-	r.GET("/api/*subPath", handler.SubRouter)
 
 	// SPA catch-all闁挎稒鑹鹃幃鎾诲籍鐠轰警妲遍柣鐐叉閻楀鎹勯姘辩獮妤犵偞褰冮崳锝夊冀閻撳海纭€闁汇劌瀚褰掓⒓閸涘瓨鎳犻柟?	// 濞撴艾顑呴々褔鏁?{sub_path}/{token} -> /s/f034db92-8d33-4952-9cd5-2fe01669a379
 	r.NoRoute(func(c *gin.Context) {
