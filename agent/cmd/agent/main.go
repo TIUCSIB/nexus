@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"flag"
+	
 	"fmt"
 	"log"
 	"os"
@@ -16,6 +16,7 @@ import (
 	"nexus-agent/internal/collector"
 	"nexus-agent/internal/config"
 	"nexus-agent/internal/httpclient"
+	"nexus-agent/internal/devicelimit"
 	"nexus-agent/internal/proxy"
 )
 
@@ -25,18 +26,19 @@ const (
 	aliveInterval      = 30 * time.Second
 	configPullTimeout  = 30 * time.Second
 	maxConfigFailures  = 3
-	watchCheckInterval = 5 * time.Second
+	watchCheckInterval      = 5 * time.Second
+	deviceLimitCheckInterval = 10 * time.Second
+	deviceLimitSyncInterval  = 60 * time.Second
 )
 
 func main() {
-	configPath := flag.String("config", "agent.yaml", "path to agent config file")
-	flag.Parse()
-
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	log.Printf("Nexus Agent starting...")
 
-	// Load configuration
-	cfg, err := config.Load(*configPath)
+	// Load configuration: supports CLI flags and environment variables.
+	// Quick mode: ./agent --panel URL --token TOKEN
+	// Env mode: NEXUS_PANEL_URL, NEXUS_TOKEN, NEXUS_NODE_NAME
+	cfg, err := config.LoadWithCLI(os.Args)
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
 	}
@@ -122,6 +124,19 @@ func runNode(ctx context.Context, client *httpclient.Client, nodeCfg config.Node
 	defer statsTicker.Stop()
 	aliveTicker := time.NewTicker(aliveInterval)
 	defer aliveTicker.Stop()
+
+	// Device limit enforcement
+	deviceLimitEnforcer := devicelimit.New(nodeCfg.Singbox.StatsURL)
+	deviceLimitTicker := time.NewTicker(deviceLimitCheckInterval)
+	defer deviceLimitTicker.Stop()
+	syncLimitsTicker := time.NewTicker(deviceLimitSyncInterval)
+	defer syncLimitsTicker.Stop()
+
+	// Initial device limit sync
+	if limits, err := client.FetchDeviceLimit(authToken); err == nil {
+		deviceLimitEnforcer.UpdateLimits(limits)
+		log.Printf("%sDevice limits synced: %d users with limits", prefix, len(limits))
+	}
 
 	startTime := time.Now()
 	configFailures := 0
@@ -217,6 +232,30 @@ func runNode(ctx context.Context, client *httpclient.Client, nodeCfg config.Node
 			log.Printf("%sReporting alive IPs for %d users", prefix, len(aliveIPs))
 			if err := client.ReportAlive(nodeID, authToken, aliveIPs); err != nil {
 				log.Printf("%sFailed to report alive IPs: %v", prefix, err)
+			}
+
+		case <-deviceLimitTicker.C:
+			if !sbManager.IsRunning() || !deviceLimitEnforcer.HasLimits() {
+				continue
+			}
+			closed, err := deviceLimitEnforcer.Enforce()
+			if err != nil {
+				log.Printf("%sDevice limit enforcement error: %v", prefix, err)
+				continue
+			}
+			if closed > 0 {
+				log.Printf("%sDevice limit: closed %d excess connections", prefix, closed)
+			}
+
+		case <-syncLimitsTicker.C:
+			limits, err := client.FetchDeviceLimit(authToken)
+			if err != nil {
+				log.Printf("%sDevice limit sync error: %v", prefix, err)
+				continue
+			}
+			deviceLimitEnforcer.UpdateLimits(limits)
+			if len(limits) > 0 {
+				log.Printf("%sDevice limits refreshed: %d users with limits", prefix, len(limits))
 			}
 		}
 	}

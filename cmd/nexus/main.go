@@ -11,6 +11,7 @@ import (
 	"nexus/internal/database"
 	"nexus/internal/http/router"
 	"nexus/internal/pkg/jwt"
+	"nexus/internal/service"
 )
 
 func main() {
@@ -43,6 +44,10 @@ func main() {
 	}
 
 	r := router.Setup()
+
+	// Start background scheduler (monthly traffic reset etc.)
+	service.StartScheduler()
+
 	addr := fmt.Sprintf("%s:%d", config.Global.Server.Host, config.Global.Server.Port)
 	log.Printf("Nexus Panel started at %s", addr)
 	if err := r.Run(addr); err != nil {

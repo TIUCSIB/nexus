@@ -1,6 +1,9 @@
 package router
 
 import (
+	"strings"
+
+	"nexus/internal/database"
 	"nexus/internal/http/handler"
 	"nexus/internal/http/middleware"
 
@@ -10,30 +13,25 @@ import (
 func Setup() *gin.Engine {
 	r := gin.Default()
 
-	r.GET("/health", func(c *gin.Context) {
+	// Force HTTPS
+	r.Use(middleware.ForceHTTPS())
+
+	// Public site info (no auth required, used by login page)
+	r.GET("/api/site/info", handler.GetSiteInfo)
+
+	r.GET("/api/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{"status": "ok", "service": "nexus"})
 	})
 
 	// Auth (no registration - admin creates users)
-	auth := r.Group("/auth")
+	auth := r.Group("/api/auth")
 	{
 		auth.POST("/login", handler.Login)
 		auth.POST("/refresh", handler.RefreshToken)
 	}
 
-	// Subscription (token-based, no JWT)
-	sub := r.Group("/sub")
-	{
-		sub.GET("/singbox", handler.SubSingbox)
-		sub.GET("/clash", handler.SubClash)
-		sub.GET("/surge", handler.SubSurge)
-		sub.GET("/surfboard", handler.SubSurfboard)
-		sub.GET("/shadowrocket", handler.SubShadowrocket)
-		sub.GET("/v2rayn", handler.SubV2RayN)
-	}
-
 	// User endpoints (JWT required)
-	user := r.Group("/user")
+	user := r.Group("/api/user")
 	user.Use(middleware.Auth())
 	{
 		user.GET("/profile", handler.GetProfile)
@@ -42,7 +40,7 @@ func Setup() *gin.Engine {
 	}
 
 	// Node endpoints (JWT required)
-	nodes := r.Group("/nodes")
+	nodes := r.Group("/api/nodes")
 	nodes.Use(middleware.Auth())
 	{
 		nodes.GET("", handler.ListNodes)
@@ -50,7 +48,7 @@ func Setup() *gin.Engine {
 	}
 
 	// Agent communication (internal, token-based)
-	agent := r.Group("/internal/agent")
+	agent := r.Group("/api/internal/agent")
 	{
 		agent.POST("/register", handler.AgentRegister)
 		agentAuth := agent.Group("")
@@ -61,11 +59,12 @@ func Setup() *gin.Engine {
 			agentAuth.POST("/traffic", handler.AgentReportTraffic)
 			agentAuth.POST("/alive", handler.AgentReportAlive)
 			agentAuth.GET("/alivelist", handler.AgentGetAliveList)
+			agentAuth.GET("/devicelimit", handler.AgentGetDeviceLimit)
 		}
 	}
 
 	// Admin endpoints (JWT + admin required)
-	admin := r.Group("/admin")
+	admin := r.Group("/api/admin")
 	admin.Use(middleware.Auth(), middleware.Admin())
 	{
 		admin.GET("/users", handler.AdminListUsers)
@@ -73,6 +72,7 @@ func Setup() *gin.Engine {
 		admin.POST("/users", handler.AdminCreateUser)
 		admin.PUT("/users/:id", handler.AdminUpdateUser)
 		admin.DELETE("/users/:id", handler.AdminDeleteUser)
+		admin.GET("/users/:id/traffic-logs", handler.AdminGetUserTrafficLogs)
 
 		admin.GET("/plans", handler.AdminListPlans)
 		admin.POST("/plans", handler.AdminCreatePlan)
@@ -81,9 +81,16 @@ func Setup() *gin.Engine {
 
 		admin.GET("/nodes", handler.AdminListNodes)
 		admin.POST("/nodes", handler.AdminCreateNode)
+		admin.POST("/nodes/generate-reality-keys", handler.AdminGenerateRealityKeys)
 		admin.PUT("/nodes/:id", handler.AdminUpdateNode)
 		admin.DELETE("/nodes/:id", handler.AdminDeleteNode)
 		admin.POST("/nodes/:id/restart", handler.AdminRestartNode)
+		admin.POST("/nodes/:id/reset-traffic", handler.AdminResetNodeTraffic)
+
+		admin.GET("/groups", handler.AdminListGroups)
+		admin.POST("/groups", handler.AdminCreateGroup)
+		admin.PUT("/groups/:id", handler.AdminUpdateGroup)
+		admin.DELETE("/groups/:id", handler.AdminDeleteGroup)
 
 		admin.GET("/routes", handler.AdminListRoutes)
 		admin.POST("/routes", handler.AdminCreateRoute)
@@ -95,7 +102,39 @@ func Setup() *gin.Engine {
 
 		admin.GET("/stats/overview", handler.AdminStatsOverview)
 		admin.GET("/stats/traffic", handler.AdminStatsTraffic)
+
+		admin.GET("/online-ips", handler.AdminListOnlineIPs)
+		admin.GET("/traffic-logs", handler.AdminListTrafficLogs)
 	}
+
+	// 闁告柣鍔嶉埀顑挎祰椤撳綊姊奸崨鎵唴闁汇垺鍞荤槐姗漃I 闁哄秶鍘х槐锟犳晬婢舵稓绐?api/{sub_path}/{format} 闁?/api/{sub_path}/{token}
+	r.GET("/api/*subPath", handler.SubRouter)
+
+	// SPA catch-all闁挎稒鑹鹃幃鎾诲籍鐠轰警妲遍柣鐐叉閻楀鎹勯姘辩獮妤犵偞褰冮崳锝夊冀閻撳海纭€闁汇劌瀚褰掓⒓閸涘瓨鎳犻柟?	// 濞撴艾顑呴々褔鏁?{sub_path}/{token} -> /s/f034db92-8d33-4952-9cd5-2fe01669a379
+	r.NoRoute(func(c *gin.Context) {
+		if c.Request.Method != "GET" {
+			c.JSON(404, gin.H{"error": "not found"})
+			return
+		}
+
+		// 閻忓繑绻嗛惁顖炲礌瑜版帒甯抽柡宥囶攰閻儳顕ラ崟顒傚鐎殿喖楠忕槐?{sub_path}/{token}
+		path := strings.Trim(c.Request.URL.Path, "/")
+		parts := strings.SplitN(path, "/", 2)
+		if len(parts) == 2 {
+			subPath := strings.Trim(database.GetSettingDefault("sub_path", "s"), "/")
+			if subPath == "" {
+				subPath = "s"
+			}
+			if parts[0] == subPath {
+				// 闁告牕缍婇崢銈夊礆閹峰矈鍚傞梻鍐ㄦ嚀閻儳顕ラ崟鍓佺閻?token 闁衡偓閹冨汲 query 妤犵偞鍎肩换鎴﹀炊?singbox 闁哄秶鍘х槐?				c.Request.URL.RawQuery = "token=" + parts[1]
+				handler.SubSingbox(c)
+				return
+			}
+		}
+
+		// 闁稿繑婀圭划顒傛崉椤栨氨绐為悹?SPA
+		c.File("./web/dist/index.html")
+	})
 
 	return r
 }

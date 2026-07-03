@@ -45,6 +45,7 @@ func Init(cfg config.DatabaseConfig) error {
 		&model.User{},
 		&model.Plan{},
 		&model.Node{},
+		&model.ServerGroup{},
 		&model.TrafficLog{},
 		&model.SystemConfig{},
 		&model.AliveIP{},
@@ -91,6 +92,7 @@ func CreateInitialAdmin() error {
 	fmt.Printf("管理员账号 %s 创建成功\n", email)
 	return nil
 }
+
 func CreateAdminByEmail(email, password string) error {
 	hash, err := crypto.HashPassword(password)
 	if err != nil {

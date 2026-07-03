@@ -1,4 +1,4 @@
-﻿package model
+package model
 
 type SystemConfig struct {
 	Key   string `gorm:"type:text;primaryKey" json:"key"`

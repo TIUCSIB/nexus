@@ -89,7 +89,7 @@ func (c *Client) Register(name, address, registerToken string) (nodeID uint, aut
 	}
 
 	var resp apiResponse
-	if err := c.post("/api/v1/internal/agent/register", "", body, &resp); err != nil {
+	if err := c.post("/api/internal/agent/register", "", body, &resp); err != nil {
 		return 0, "", fmt.Errorf("register request: %w", err)
 	}
 	if resp.Code != 0 {
@@ -112,7 +112,7 @@ func (c *Client) Heartbeat(authToken string, cpu, mem float64, uptime uint64) (c
 	}
 
 	var resp apiResponse
-	if err := c.post("/api/v1/internal/agent/heartbeat", authToken, body, &resp); err != nil {
+	if err := c.post("/api/internal/agent/heartbeat", authToken, body, &resp); err != nil {
 		return false, fmt.Errorf("heartbeat request: %w", err)
 	}
 	if resp.Code != 0 {
@@ -130,7 +130,7 @@ func (c *Client) Heartbeat(authToken string, cpu, mem float64, uptime uint64) (c
 // Uses ETag caching: sends If-None-Match header, and on 304 returns empty strings
 // with changed=false. On 200, updates the stored ETag and returns changed=true.
 func (c *Client) GetConfig(authToken string) (configJSON string, usersJSON string, changed bool, err error) {
-	req, err := http.NewRequest(http.MethodGet, c.baseURL+"/api/v1/internal/agent/config", nil)
+	req, err := http.NewRequest(http.MethodGet, c.baseURL+"/api/internal/agent/config", nil)
 	if err != nil {
 		return "", "", false, fmt.Errorf("create config request: %w", err)
 	}
@@ -185,7 +185,7 @@ func (c *Client) GetConfig(authToken string) (configJSON string, usersJSON strin
 // ReportTraffic sends collected traffic statistics to the panel.
 func (c *Client) ReportTraffic(authToken string, entries []TrafficEntry) error {
 	var resp apiResponse
-	if err := c.post("/api/v1/internal/agent/traffic", authToken, entries, &resp); err != nil {
+	if err := c.post("/api/internal/agent/traffic", authToken, entries, &resp); err != nil {
 		return fmt.Errorf("report traffic request: %w", err)
 	}
 	if resp.Code != 0 {
@@ -202,7 +202,7 @@ func (c *Client) ReportAlive(nodeID uint, authToken string, data map[string][]st
 	}
 
 	var resp apiResponse
-	if err := c.post("/api/v1/internal/agent/alive", authToken, body, &resp); err != nil {
+	if err := c.post("/api/internal/agent/alive", authToken, body, &resp); err != nil {
 		return fmt.Errorf("report alive request: %w", err)
 	}
 	if resp.Code != 0 {
@@ -211,6 +211,34 @@ func (c *Client) ReportAlive(nodeID uint, authToken string, data map[string][]st
 	return nil
 }
 
+
+// deviceLimitResponse is what the panel returns on GET /internal/agent/devicelimit.
+type deviceLimitResponse struct {
+	Limits map[string]int `json:"limits"`
+}
+
+// FetchDeviceLimit retrieves per-user device limits from the panel.
+// Returns a map of UUID -> device_limit for users that have limits configured.
+func (c *Client) FetchDeviceLimit(authToken string) (map[string]int, error) {
+	var resp apiResponse
+	if err := c.get("/api/internal/agent/devicelimit", authToken, &resp); err != nil {
+		return nil, fmt.Errorf("fetch device limit request: %w", err)
+	}
+	if resp.Code != 0 {
+		return nil, fmt.Errorf("fetch device limit failed: %s", resp.Message)
+	}
+
+	var data deviceLimitResponse
+	if err := json.Unmarshal(resp.Data, &data); err != nil {
+		return nil, fmt.Errorf("decode device limit response: %w", err)
+	}
+	if data.Limits == nil {
+		data.Limits = make(map[string]int)
+	}
+	return data.Limits, nil
+}
+
+// GetConnID returns the connection ID from a connection entry.
 // post sends a JSON POST request to the panel.
 func (c *Client) post(path, authToken string, payload interface{}, result *apiResponse) error {
 	data, err := json.Marshal(payload)

@@ -1,4 +1,4 @@
-﻿package subscription
+package subscription
 
 import (
 	"encoding/base64"
@@ -12,21 +12,40 @@ import (
 // GenerateV2RayN 生成 Base64 编码的 URI 列表（兼容 V2RayN、ClashR 等客户端）。
 func GenerateV2RayN(nodes []model.Node, user model.User) ([]byte, error) {
 	var lines []string
+	var firstURI string
 
 	for _, node := range nodes {
 		if node.Status != 1 {
 			continue
 		}
 		params := ParseNodeParams(node.ConfigJSON)
+		var uri string
 
 		switch strings.ToLower(node.Protocol) {
 		case "vless":
-			lines = append(lines, buildVlessURI(node, user, params))
+			uri = buildVlessURI(node, user, params)
 		case "hysteria2":
-			lines = append(lines, buildHysteria2URI(node, user, params))
+			uri = buildHysteria2URI(node, user, params)
 		case "tuic":
-			lines = append(lines, buildTuicURI(node, user, params))
+			uri = buildTuicURI(node, user, params)
 		}
+		if uri != "" {
+			if firstURI == "" {
+				firstURI = uri
+			}
+			lines = append(lines, uri)
+		}
+	}
+
+	// 杩藉姞淇℃伅鑺傜偣
+	if firstURI != "" {
+		expiryName, trafficName := GetInfoNodeNames(user)
+		// 淇℃伅鑺傜偣1锛氬埌鏈熸椂闂达級
+		info1 := buildInfoURI(firstURI, expiryName)
+		lines = append(lines, info1)
+		// 淇℃伅鑺傜偣2锛氬墿浣欐祦閲忥級
+		info2 := buildInfoURI(firstURI, trafficName)
+		lines = append(lines, info2)
 	}
 
 	content := strings.Join(lines, "\n")
@@ -52,6 +71,7 @@ func GenerateSurge(nodes []model.Node, user model.User) ([]byte, error) {
 	b.WriteString("\n[Proxy]\n")
 
 	proxyNames := make([]string, 0)
+	var firstLine string
 
 	for _, node := range nodes {
 		if node.Status != 1 {
@@ -72,9 +92,23 @@ func GenerateSurge(nodes []model.Node, user model.User) ([]byte, error) {
 		}
 
 		if line != "" {
+			if firstLine == "" {
+				firstLine = line
+			}
 			b.WriteString(line + "\n")
 			proxyNames = append(proxyNames, node.Name)
 		}
+	}
+
+	// 杩藉姞淇℃伅鑺傜偣
+	if firstLine != "" {
+		expiryName, trafficName := GetInfoNodeNames(user)
+		info1 := buildSurgeInfoNode(firstLine, expiryName)
+		b.WriteString(info1 + "\n")
+		proxyNames = append(proxyNames, expiryName)
+		info2 := buildSurgeInfoNode(firstLine, trafficName)
+		b.WriteString(info2 + "\n")
+		proxyNames = append(proxyNames, trafficName)
 	}
 
 	// Proxy Group
@@ -282,4 +316,22 @@ func buildSurgeTUIC(node model.Node, user model.User, p NodeParams) string {
 
 	return fmt.Sprintf("%s = tuic, %s, %d, uuid=%s, password=%s, sni=%s",
 		node.Name, node.Address, node.Port, user.UUID, password, sni)
+}
+
+// buildInfoURI creates an info node URI (for V2RayN/Shadowrocket format)
+func buildInfoURI(firstURI string, infoName string) string {
+	idx := strings.LastIndex(firstURI, "#")
+	if idx >= 0 {
+		return firstURI[:idx] + "#" + url.QueryEscape(infoName)
+	}
+	return firstURI + "#" + url.QueryEscape(infoName)
+}
+
+// buildSurgeInfoNode creates a Surge/Surfboard format info node
+func buildSurgeInfoNode(firstLine string, infoName string) string {
+	idx := strings.Index(firstLine, " = ")
+	if idx >= 0 {
+		return infoName + firstLine[idx:]
+	}
+	return firstLine
 }

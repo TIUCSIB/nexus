@@ -9,6 +9,7 @@ import (
 
 	"nexus/internal/database"
 	"nexus/internal/model"
+	"nexus/internal/service"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -202,14 +203,25 @@ func AgentGetConfig(c *gin.Context) {
 		return
 	}
 
-	// Build users JSON from active users (includes speed limits)
+	// Fetch active users for config generation
+	var users []model.User
+	database.DB.Where("status = ?", 1).Find(&users)
+
+	// Generate complete sing-box config using the config generator
+	generatedConfig, err := service.GenerateSingboxConfig(node, users)
+	if err != nil {
+		InternalError(c, "failed to generate config: "+err.Error())
+		return
+	}
+
+	// Build users JSON for agent (speed limits etc)
 	usersJSON := buildUsersJSON()
 
-	// Build routes JSON from active route rules
+	// Build routes JSON for agent
 	routesJSON := buildRoutesJSON()
 
 	Success(c, agentConfigResp{
-		ConfigJSON: node.ConfigJSON,
+		ConfigJSON: generatedConfig,
 		UsersJSON:  usersJSON,
 		RoutesJSON: routesJSON,
 	})
@@ -340,6 +352,28 @@ func AgentGetAliveList(c *gin.Context) {
 	}
 
 	Success(c, agentAliveResp{Alive: alive})
+}
+
+// AgentGetDeviceLimit returns device_limit for all users that have it set.
+// GET /api/internal/agent/devicelimit
+func AgentGetDeviceLimit(c *gin.Context) {
+	var results []struct {
+		UUID        string
+		DeviceLimit int
+	}
+
+	database.DB.Raw(`
+		SELECT uuid, device_limit
+		FROM users
+		WHERE status = 1 AND device_limit > 0
+	`).Scan(&results)
+
+	limits := make(map[string]int)
+	for _, r := range results {
+		limits[r.UUID] = r.DeviceLimit
+	}
+
+	Success(c, gin.H{"limits": limits})
 }
 
 // buildUsersJSON creates a JSON array of active user credentials for sing-box.

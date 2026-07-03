@@ -1,8 +1,8 @@
 import request from '@/utils/request'
-import type { ApiResponse } from '@/types'
+import type { ApiResponse, StatsOverview, TrafficDay } from '@/types'
 
 export const getOverview = () =>
-  request.get('/admin/stats/overview') as Promise<ApiResponse>
+  request.get('/api/admin/stats/overview') as Promise<ApiResponse<StatsOverview>>
 
 export const getTraffic = (days = 7) =>
-  request.get('/admin/stats/traffic', { params: { days } }) as Promise<ApiResponse>
+  request.get('/api/admin/stats/traffic', { params: { days } }) as Promise<ApiResponse<{ days: number; records: TrafficDay[] }>>

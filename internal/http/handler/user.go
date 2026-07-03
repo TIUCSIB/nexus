@@ -1,8 +1,8 @@
-﻿package handler
+package handler
 
 import (
 	"fmt"
-	"time"
+	"strings"
 
 	"nexus/internal/config"
 	"nexus/internal/database"
@@ -74,8 +74,6 @@ func UpdateProfile(c *gin.Context) {
 		return
 	}
 
-	updates["updated_at"] = time.Now()
-
 	if err := database.DB.Model(&user).Updates(updates).Error; err != nil {
 		InternalError(c, "更新个人资料失败")
 		return
@@ -83,6 +81,31 @@ func UpdateProfile(c *gin.Context) {
 
 	database.DB.First(&user, userID)
 	Success(c, user)
+}
+
+func getSubBaseURL(c *gin.Context) string {
+	if subURL := database.GetSetting("sub_url"); subURL != "" {
+		return subURL
+	}
+
+	scheme := "http"
+	if c.Request.TLS != nil {
+		scheme = "https"
+	}
+	host := c.Request.Host
+	if host != "" {
+		return scheme + "://" + host
+	}
+
+	return fmt.Sprintf("http://%s:%d", config.Global.Server.Host, config.Global.Server.Port)
+}
+
+func getSubPath() string {
+	p := strings.Trim(database.GetSettingDefault("sub_path", "s"), "/")
+	if p == "" {
+		p = "s"
+	}
+	return p
 }
 
 func GetSubscription(c *gin.Context) {
@@ -94,34 +117,54 @@ func GetSubscription(c *gin.Context) {
 		return
 	}
 
-	baseURL := fmt.Sprintf("http://%s:%d", config.Global.Server.Host, config.Global.Server.Port)
-
-	scheme := "http"
-	if c.Request.TLS != nil {
-		scheme = "https"
-	}
-	host := c.Request.Host
-	if host != "" {
-		baseURL = scheme + "://" + host
-	}
-
+	baseURL := getSubBaseURL(c)
 	token := user.Token
 
-	links := []string{
-		baseURL + "/api/v1/sub/singbox?token=" + token,
-		baseURL + "/api/v1/sub/clash?token=" + token,
-		baseURL + "/api/v1/sub/surge?token=" + token,
-		baseURL + "/api/v1/sub/surfboard?token=" + token,
-		baseURL + "/api/v1/sub/shadowrocket?token=" + token,
-		baseURL + "/api/v1/sub/v2rayn?token=" + token,
+	subURLs := strings.Split(baseURL, ",")
+	subSeg := getSubPath()
+	var links []string
+	for _, url := range subURLs {
+		url = strings.TrimSpace(url)
+		if url == "" {
+			continue
+		}
+		links = append(links,
+			url+"/api/"+subSeg+"/singbox?token="+token,
+			url+"/api/"+subSeg+"/clash?token="+token,
+			url+"/api/"+subSeg+"/surge?token="+token,
+			url+"/api/"+subSeg+"/surfboard?token="+token,
+			url+"/api/"+subSeg+"/shadowrocket?token="+token,
+			url+"/api/"+subSeg+"/v2rayn?token="+token,
+		)
+	}
+
+	// 干净格式链接：/{sub_path}/{token}（默认 singbox 格式）
+	var cleanLinks []string
+	for _, url := range subURLs {
+		url = strings.TrimSpace(url)
+		if url == "" {
+			continue
+		}
+		cleanLinks = append(cleanLinks, url+"/"+subSeg+"/"+token)
+	}
+
+	var planName string
+	if user.PlanID != nil && *user.PlanID > 0 {
+		var plan model.Plan
+		if err := database.DB.First(&plan, *user.PlanID).Error; err == nil {
+			planName = plan.Name
+		}
 	}
 
 	Success(c, gin.H{
 		"plan_id":       user.PlanID,
+		"plan_name":     planName,
 		"traffic_used":  user.TrafficUsed,
 		"traffic_limit": user.TrafficLimit,
 		"expired_at":    user.ExpiredAt,
 		"token":         token,
 		"links":         links,
+		"clean_links":   cleanLinks,
+		"sub_path":      subSeg,
 	})
 }

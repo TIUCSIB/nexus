@@ -1,0 +1,23 @@
+# Nexus Agent Configuration
+# For quick setup, you can skip this file entirely and use CLI flags:
+#   ./nexus-agent --panel https://panel.com --token YOUR_TOKEN --name my-node
+#
+# Or environment variables:
+#   export NEXUS_PANEL_URL=https://panel.com
+#   export NEXUS_TOKEN=YOUR_TOKEN
+#   export NEXUS_NODE_NAME=my-node
+#   ./nexus-agent
+
+panel:
+  address: "https://panel.example.com:8080"
+
+nodes:
+  - name: "my-node"
+    token: "YOUR_REGISTER_TOKEN_HERE"
+    address: "auto"  # auto-detect, or set to server IP
+    singbox:
+      binary_path: "sing-box"
+      config_path: "singbox.json"
+      working_dir: "."
+      stats_url: "http://127.0.0.1:9090"
+      stats_port: 9090

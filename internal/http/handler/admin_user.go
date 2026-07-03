@@ -4,7 +4,11 @@ import (
 	"strconv"
 	"time"
 
-	"nexus/internal/database"
+	"fmt"
+"strings"
+
+"nexus/internal/config"
+"nexus/internal/database"
 	"nexus/internal/model"
 	"nexus/internal/pkg/crypto"
 
@@ -48,11 +52,82 @@ func AdminGetUser(c *gin.Context) {
 
 	var user model.User
 	if err := database.DB.First(&user, id).Error; err != nil {
-		NotFound(c, "\u7528\u6237\u4e0d\u5b58\u5728")
+		NotFound(c, "用户不存在")
 		return
 	}
 
-	Success(c, user)
+	var planName string
+	if user.PlanID != nil && *user.PlanID > 0 {
+		var plan model.Plan
+		if err := database.DB.First(&plan, *user.PlanID).Error; err == nil {
+			planName = plan.Name
+		}
+	}
+
+	var groupName string
+	if user.GroupID != nil && *user.GroupID > 0 {
+		var group model.ServerGroup
+		if err := database.DB.First(&group, *user.GroupID).Error; err == nil {
+			groupName = group.Name
+		}
+	}
+	if groupName == "" && user.PlanID != nil && *user.PlanID > 0 {
+		var plan model.Plan
+		if err := database.DB.First(&plan, *user.PlanID).Error; err == nil {
+			if plan.GroupID != nil && *plan.GroupID > 0 {
+				var group model.ServerGroup
+				if err := database.DB.First(&group, *plan.GroupID).Error; err == nil {
+					groupName = group.Name
+				}
+			}
+		}
+	}
+
+	var ipCount int64
+	database.DB.Model(&model.AliveIP{}).Where("user_id = ?", user.ID).Count(&ipCount)
+
+	subSeg := getSubPath()
+	baseURL := database.GetSetting("sub_url")
+	if baseURL == "" {
+		baseURL = fmt.Sprintf("http://%s:%d", config.Global.Server.Host, config.Global.Server.Port)
+	}
+
+	token := user.Token
+	subURLs := strings.Split(baseURL, ",")
+	var links []string
+	for _, url := range subURLs {
+		url = strings.TrimSpace(url)
+		if url == "" {
+			continue
+		}
+		links = append(links,
+			url+"/api/"+subSeg+"/singbox?token="+token,
+			url+"/api/"+subSeg+"/clash?token="+token,
+			url+"/api/"+subSeg+"/surge?token="+token,
+			url+"/api/"+subSeg+"/surfboard?token="+token,
+			url+"/api/"+subSeg+"/shadowrocket?token="+token,
+			url+"/api/"+subSeg+"/v2rayn?token="+token,
+		)
+	}
+
+	var cleanLinks []string
+	for _, url := range subURLs {
+		url = strings.TrimSpace(url)
+		if url == "" {
+			continue
+		}
+		cleanLinks = append(cleanLinks, url+"/"+subSeg+"/"+token)
+	}
+
+	Success(c, gin.H{
+		"user":        user,
+		"plan_name":   planName,
+		"group_name":  groupName,
+		"ip_count":    ipCount,
+		"links":       links,
+		"clean_links": cleanLinks,
+		"sub_path":    subSeg,
+	})
 }
 
 type createUserRequest struct {
