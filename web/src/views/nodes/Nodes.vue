@@ -13,10 +13,10 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Separator } from '@/components/ui/separator'
-import { Plus, MoreHorizontal, Pencil, Trash2, RotateCcw, Settings } from 'lucide-vue-next'
+import { Plus, MoreHorizontal, Pencil, Trash2, RotateCcw, Settings, Copy } from 'lucide-vue-next'
 import { RefreshCw, SlidersHorizontal } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
-import { listNodes, createNode, updateNode, deleteNode, restartNode } from '@/api/node'
+import { listNodes, createNode, updateNode, deleteNode, restartNode, resetNodeTraffic } from '@/api/node'
 import { generateRealityKeys } from '@/api/node'
 import { listGroups } from '@/api/group'
 import { listRoutes } from '@/api/route'
@@ -29,16 +29,16 @@ const nodes = ref<Node[]>([])
 const groups = ref<ServerGroup[]>([])
 const routes = ref<RouteRule[]>([])
 
-
 const page = ref(1)
 const dialogOpen = ref(false)
 const total = ref(0)
 const deleteDialogOpen = ref(false)
+const resetTrafficDialogOpen = ref(false)
 const editing = ref<Partial<Node>>({})
 const isEdit = ref(false)
 const saving = ref(false)
 
-/* ── 高级设置弹窗 ── */
+/* --- advanced settings dialog --- */
 const advancedOpen = ref(false)
 const advancedTab = ref('tls')
 const advancedTls = ref({
@@ -125,7 +125,6 @@ function saveAdvanced() {
       settings.tls_cert_content = advancedTls.value.cert_content
       settings.tls_key_content = advancedTls.value.key_content
     }
-    /* multiplex */
     settings.multiplex_enabled = multiplex.value.enabled
     if (multiplex.value.enabled) {
       settings.multiplex_protocol = multiplex.value.protocol
@@ -156,7 +155,7 @@ function saveAdvanced() {
   }
 }
 
-/* ── 传输协议配置 ── */
+/* --- transport protocol config --- */
 const vlessTransports = [
   { value: 'tcp', label: 'TCP' },
   { value: 'ws', label: 'WebSocket' },
@@ -167,9 +166,9 @@ const vlessTransports = [
   { value: 'xhttp', label: 'XHTTP' },
 ]
 
-/* ── Reality 密钥对生成 ── */
+/* --- Reality key generation --- */
 
-/* ── 编辑协议弹窗 ── */
+/* --- protocol config edit dialog --- */
 const protocolEditOpen = ref(false)
 const protocolJson = ref('')
 
@@ -194,14 +193,14 @@ const transportTemplates: Record<string, { label: string; json: string }[]> = {
     { label: '使用HTTPUpgrade模板', json: '{"path":"/httpupgrade","host":"www.example.com","headers":{}}' },
   ],
   xhttp: [
-    { label: '??XHTTP??', json: '{"path":"/xhttp","host":"www.example.com"}' },
+    { label: '使用XHTTP模板', json: '{"path":"/xhttp","host":"www.example.com"}' },
   ],
   hysteria2: [
-    { label: '??Hysteria2??', json: '{"version":2,"bandwidth":{"up":100,"down":500}}' },
-    { label: '??Hysteria2 + ????', json: '{"version":2,"bandwidth":{"up":100,"down":500},"obfs":{"open":true,"type":"salamander","password":"changeme"}}' },
+    { label: '使用Hysteria2模板', json: '{"version":2,"bandwidth":{"up":100,"down":500}}' },
+    { label: '使用Hysteria2 + 混淆', json: '{"version":2,"bandwidth":{"up":100,"down":500},"obfs":{"open":true,"type":"salamander","password":"changeme"}}' },
   ],
   tuic: [
-    { label: '??TUIC??', json: '{"congestion_control":"cubic","udp_relay_mode":"native"}' },
+    { label: '使用TUIC模板', json: '{"congestion_control":"cubic","udp_relay_mode":"native"}' },
   ],
 }
 
@@ -287,14 +286,13 @@ function buildNetSettingsString(): string {
   return Object.keys(clean).length ? JSON.stringify(clean) : ''
 }
 
-/* 根据传输协议自动设置 host 默认值 */
 watch(() => editing.value.protocol, (proto) => {
   if (proto === 'vless' && editing.value.address && !netSettings.value.host) {
     netSettings.value.host = editing.value.address
   }
 })
 
-/* ── 工具函数 ── */
+/* --- utilities --- */
 function formatBytes(b: number | undefined | null) {
   if (!b || b === 0) return '0 B'
   const k = 1024; const s = ['B', 'KB', 'MB', 'GB', 'TB']
@@ -319,7 +317,14 @@ function getRouteName(id: number | null | undefined) {
   return r ? r.name : ''
 }
 
-/* ── 数据加载 ── */
+/* --- node status: red=offline, yellow=idle/abnormal, green=running with users --- */
+function getNodeStatus(n: Node): { color: string; label: string } {
+  if (!n.online) return { color: 'bg-red-500', label: '未运行' }
+  if (n.online_count > 0) return { color: 'bg-green-500', label: '运行正常' }
+  return { color: 'bg-yellow-500', label: '无人使用或异常' }
+}
+
+/* --- data loading --- */
 async function fetchData() {
   try {
     const res = await listNodes({ page: page.value, page_size: 20 })
@@ -337,7 +342,7 @@ async function fetchOptions() {
   } catch {}
 }
 
-/* ── 弹窗操作 ── */
+/* --- dialog operations --- */
 function openCreate() {
   editing.value = {
     custom_id: '', name: '', address: '', protocol: 'vless', port: 443,
@@ -346,7 +351,6 @@ function openCreate() {
     security: 'none', transport: 'tcp', flow_control: 'none',
     config_mode: 'auto', config_json: '', network_settings: '', status: 1,
   }
-  netSettings.value = { host: '' }
   netSettings.value = { host: '', reality_port: 443 }
   isEdit.value = false
   dialogOpen.value = true
@@ -358,6 +362,20 @@ function openEdit(n: Node) {
   syncAlpnFromSettings()
   isEdit.value = true
   dialogOpen.value = true
+}
+
+function openCopy(n: Node) {
+  editing.value = { ...n }
+  delete editing.value.id
+  delete editing.value.created_at
+  delete editing.value.updated_at
+  editing.value.name = n.name + ' - 副本'
+  editing.value.custom_id = ''
+  netSettings.value = parseNetSettings(n.network_settings)
+  syncAlpnFromSettings()
+  isEdit.value = false
+  dialogOpen.value = true
+  toast.info('已复制节点配置，请修改后提交')
 }
 
 async function handleSave() {
@@ -387,6 +405,16 @@ async function handleDelete() {
   } catch (e: any) { toast.error(e?.response?.data?.message || '删除失败') }
 }
 
+function confirmResetTraffic(n: Node) { editing.value = n; resetTrafficDialogOpen.value = true }
+
+async function handleResetTraffic() {
+  try {
+    const res = await resetNodeTraffic(editing.value.id!)
+    if (res.code === 0) { toast.success('流量已重置'); resetTrafficDialogOpen.value = false; fetchData() }
+    else { toast.error(res.message || '重置失败') }
+  } catch (e: any) { toast.error(e?.response?.data?.message || '重置失败') }
+}
+
 async function handleRestart(id: number) {
   try {
     const res = await restartNode(id)
@@ -408,36 +436,61 @@ onMounted(() => { fetchData(); fetchOptions() })
       <Button @click="openCreate"><Plus class="mr-2 h-4 w-4" />创建节点</Button>
     </div>
 
-    <!-- 节点列表表格 -->
+    <!-- 节点表格 -->
     <Card>
       <CardContent class="p-0">
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead class="w-16">ID</TableHead>
-              <TableHead>节点名称</TableHead>
-              <TableHead>节点倍率</TableHead>
-              <TableHead>自定义ID</TableHead>
-              <TableHead>状态</TableHead>
+              <TableHead class="w-20">节点ID</TableHead>
+              <TableHead class="w-12">显隐</TableHead>
+              <TableHead>节点</TableHead>
+              <TableHead>地址</TableHead>
+              <TableHead class="w-24 text-center">在线人数</TableHead>
+              <TableHead class="w-20">倍率</TableHead>
+              <TableHead class="w-24">权限组</TableHead>
+              <TableHead class="w-28">流量使用</TableHead>
               <TableHead class="w-16 text-right">操作</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             <TableRow v-for="n in nodes" :key="n.id">
-              <TableCell><Badge variant="outline">{{ n.id }}</Badge></TableCell>
+              <TableCell>
+                <Badge variant="outline" class="font-mono">{{ n.custom_id || n.id }}</Badge>
+              </TableCell>
+              <TableCell>
+                <Switch
+                  :model-value="n.status === 1"
+                  @update:model-value="async (val) => { await updateNode(n.id, { status: val ? 1 : 0 }); fetchData() }"
+                />
+              </TableCell>
               <TableCell>
                 <div class="flex items-center gap-2">
-                  <span :class="n.online ? 'bg-green-500' : 'bg-gray-400'" class="w-2 h-2 rounded-full shrink-0" />
+                  <span :class="getNodeStatus(n).color" class="w-2.5 h-2.5 rounded-full shrink-0" :title="getNodeStatus(n).label" />
                   <span class="font-medium">{{ n.name }}</span>
                   <Badge v-for="tag in parseTags(n.tags)" :key="tag" variant="secondary" class="text-xs">{{ tag }}</Badge>
                 </div>
               </TableCell>
-              <TableCell><Badge variant="secondary">{{ n.rate || 1 }}x</Badge></TableCell>
               <TableCell>
-                <span v-if="n.custom_id" class="font-mono text-sm">{{ n.custom_id }}</span>
+                <span class="font-mono text-sm">{{ n.address }}:{{ n.port }}</span>
+              </TableCell>
+              <TableCell class="text-center">
+                <div class="flex items-center justify-center gap-1 text-sm">
+                  <span class="text-muted-foreground">👤</span>
+                  <span>{{ n.online_count || 0 }}</span>
+                </div>
+              </TableCell>
+              <TableCell>
+                <Badge variant="secondary">{{ n.rate || 1 }}x</Badge>
+              </TableCell>
+              <TableCell>
+                <Badge v-if="n.group_id" variant="outline">{{ getGroupName(n.group_id) }}</Badge>
                 <span v-else class="text-muted-foreground text-sm">-</span>
               </TableCell>
-              <TableCell><Badge :variant="n.status === 1 ? 'default' : 'secondary'">{{ n.status === 1 ? '启用' : '禁用' }}</Badge></TableCell>
+              <TableCell>
+                <span class="text-sm">{{ formatBytes(n.traffic_used) }}</span>
+                <span v-if="n.traffic_limit > 0" class="text-muted-foreground text-xs"> / {{ formatBytes(n.traffic_limit) }}</span>
+              </TableCell>
               <TableCell class="text-right" @click.stop>
                 <DropdownMenu>
                   <DropdownMenuTrigger as-child>
@@ -445,14 +498,15 @@ onMounted(() => { fetchData(); fetchOptions() })
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
                     <DropdownMenuItem @click="openEdit(n)"><Pencil class="mr-2 h-4 w-4" />编辑</DropdownMenuItem>
-                    <DropdownMenuItem @click="handleRestart(n.id)"><RotateCcw class="mr-2 h-4 w-4" />重启</DropdownMenuItem>
+                    <DropdownMenuItem @click="openCopy(n)"><Copy class="mr-2 h-4 w-4" />复制</DropdownMenuItem>
+                    <DropdownMenuItem @click="confirmResetTraffic(n)"><RotateCcw class="mr-2 h-4 w-4" />重置流量</DropdownMenuItem>
                     <DropdownMenuItem class="text-red-500" @click="confirmDelete(n)"><Trash2 class="mr-2 h-4 w-4" />删除</DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
               </TableCell>
             </TableRow>
             <TableRow v-if="!nodes.length">
-              <TableCell colspan="6" class="text-center py-12 text-muted-foreground">暂无节点数据</TableCell>
+              <TableCell colspan="9" class="text-center py-12 text-muted-foreground">暂无节点数据</TableCell>
             </TableRow>
           </TableBody>
         </Table>
@@ -487,423 +541,55 @@ onMounted(() => { fetchData(); fetchOptions() })
           </div>
         </DialogHeader>
 
-        <div class="grid gap-6 py-2">
-          <!-- 基础信息 -->
+        <div class="grid gap-4 py-2">
+          <!-- 基本信息 -->
           <div class="grid grid-cols-2 gap-4">
             <div class="grid gap-2">
               <Label>节点名称</Label>
-              <Input v-model="editing.name" placeholder="请输入节点名称" />
+              <Input v-model="editing.name" placeholder="例：HK 香港 IPLC" />
             </div>
             <div class="grid gap-2">
-              <Label>基础倍率</Label>
-              <div class="relative">
-                <Input v-model.number="editing.rate" type="number" step="0.1" min="0" class="pr-8" placeholder="1" />
-                <span class="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground pointer-events-none">x</span>
-              </div>
+              <Label>节点地址</Label>
+              <Input v-model="editing.address" placeholder="IP 或域名" />
             </div>
           </div>
 
-          <!-- 动态倍率 -->
-          <div class="flex items-center justify-between border rounded-lg p-4">
-            <div>
-              <Label>启用动态倍率</Label>
-              <p class="text-sm text-muted-foreground">根据时间段设置不同的倍率乘数</p>
-            </div>
-            <Switch v-model="editing.dynamic_rate" />
-          </div>
-
-          <!-- 流量限制 + 自定义节点ID -->
-          <div class="grid grid-cols-2 gap-4">
-            <div class="grid gap-2">
-              <Label>流量限制（GB）</Label>
-              <Input v-model.number="editing.traffic_limit" type="number" min="0" placeholder="0 表示不限制" />
-            </div>
-            <div class="grid gap-2">
-              <Label>自定义节点ID（选填）</Label>
-              <Input v-model="editing.custom_id" placeholder="请输入自定义节点ID" />
-            </div>
-          </div>
-
-          <!-- 节点标签 -->
-          <div class="grid gap-2">
-            <Label>节点标签</Label>
-            <Input v-model="editing.tags" placeholder="输入后回车添加标签，多个用逗号分隔" />
-          </div>
-
-          <!-- 权限组 -->
-          <div class="grid gap-2">
-            <Label>权限组</Label>
-            <Select v-model="editing.group_id">
-              <SelectTrigger><SelectValue placeholder="请选择权限组" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem :value="null">不分组</SelectItem>
-                <SelectItem v-for="g in groups" :key="g.id" :value="g.id">{{ g.name }}</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          <!-- 节点地址 -->
-          <div class="grid gap-2">
-            <Label>节点地址</Label>
-            <Input v-model="editing.address" placeholder="请输入节点域名或者IP" />
-          </div>
-
-          <!-- 连接端口 + 服务端口 -->
-          <div class="grid grid-cols-2 gap-4">
+          <div class="grid grid-cols-3 gap-4">
             <div class="grid gap-2">
               <Label>连接端口</Label>
-              <Input v-model.number="editing.port" type="number" placeholder="用户连接端口" />
+              <Input v-model.number="editing.port" type="number" placeholder="443" />
             </div>
             <div class="grid gap-2">
-              <Label>服务端口</Label>
-              <Input v-model.number="editing.service_port" type="number" placeholder="请输入服务端口" />
+              <Label>倍率</Label>
+              <Input v-model.number="editing.rate" type="number" step="0.1" min="0" placeholder="1" />
+            </div>
+            <div class="grid gap-2">
+              <Label>标签</Label>
+              <Input v-model="editing.tags" placeholder="用逗号分隔" />
             </div>
           </div>
 
-          <!-- ========== VLESS 协议参数 ========== -->
-          <template v-if="editing.protocol === 'vless'">
-            <Separator />
-            <div class="flex items-center gap-2">
-              <Settings class="h-4 w-4" />
-              <Label class="text-base font-semibold">VLESS 协议参数</Label>
-            </div>
-
-            <!-- 安全性 + 流控 -->
-            <div class="grid grid-cols-2 gap-4">
-              <div class="grid gap-2">
-                <Label>安全性</Label>
-                <Select v-model="editing.security">
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">无</SelectItem>
-                    <SelectItem value="tls">TLS</SelectItem>
-                    <SelectItem value="reality">Reality</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div class="grid gap-2">
-                <Label>流控</Label>
-                <Select v-model="editing.flow_control">
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">无</SelectItem>
-                    <SelectItem value="xtls-rprx-direct">xtls-rprx-direct</SelectItem>
-                    <SelectItem value="xtls-rprx-splice">xtls-rprx-splice</SelectItem>
-                    <SelectItem value="xtls-rprx-vision">xtls-rprx-vision</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            <!-- TLS 设置 -->
-            <div v-if="editing.security === 'tls'" class="grid gap-3 border rounded-lg p-4 bg-muted/30">
-              <Label class="font-medium">TLS 设置</Label>
-              <div class="grid grid-cols-2 gap-4">
-                <div class="grid gap-2">
-                  <Label>SNI / 服务器名称</Label>
-                  <Input v-model="netSettings.server_name" placeholder="例如 www.microsoft.com" />
-                </div>
-                <div class="flex items-center gap-2 pt-6">
-                  <Switch v-model="netSettings.allow_insecure" />
-                  <Label class="text-sm">允许不安全连接</Label>
-                </div>
-              </div>
-            </div>
-
-            <!-- Reality 设置 -->
-            <div v-if="editing.security === 'reality'" class="grid gap-4 border rounded-lg p-4 bg-muted/30">
-              <!-- 伪装站点 + 端口 + 允许不安全 -->
-              <div class="grid grid-cols-[1fr_120px_auto] gap-4 items-end">
-                <div class="grid gap-2">
-                  <Label>伪装站点(dest)</Label>
-                  <Input v-model="netSettings.reality_server_name" placeholder="例如: example.com" />
-                </div>
-                <div class="grid gap-2">
-                  <Label>端口(port)</Label>
-                  <Input v-model.number="netSettings.reality_port" type="number" placeholder="443" />
-                </div>
-                <div class="flex items-center gap-2 pb-1">
-                  <Switch v-model="netSettings.allow_insecure" />
-                  <Label class="text-sm whitespace-nowrap">允许不安全?</Label>
-                </div>
-              </div>
-
-              <!-- 私钥 -->
-              <div class="grid gap-2">
-                <Label>私钥(Private key)</Label>
-                <div class="relative">
-                  <Input v-model="netSettings.reality_private_key" placeholder="点击右侧按钮生成密钥对" class="pr-10" />
-                  <Button variant="ghost" size="sm" class="absolute right-0 top-0 h-full px-3" @click="handleGenerateRealityKeys" title="生成密钥对">
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
-                  </Button>
-                </div>
-              </div>
-
-              <!-- 公钥 -->
-              <div class="grid gap-2">
-                <Label>公钥(Public key)</Label>
-                <Input v-model="netSettings.reality_public_key" placeholder="Reality 公钥" />
-              </div>
-
-              <!-- Short ID -->
-              <div class="grid gap-2">
-                <Label>Short ID</Label>
-                <div class="relative">
-                  <Input v-model="netSettings.reality_short_id" placeholder="可留空，长度为2的倍数，最长16位" class="pr-10" />
-                  <Button variant="ghost" size="sm" class="absolute right-0 top-0 h-full px-3" @click="netSettings.reality_short_id = Array.from({length: 16}, () => '0123456789abcdef'[Math.floor(Math.random() * 16)]).join('')">
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/></svg>
-                  </Button>
-                </div>
-                <p class="text-xs text-muted-foreground">客户端可用的 shortId 列表，可用于区分不同的客户端，使用0-f的十六进制字符</p>
-              </div>
-
-              <!-- uTLS -->
-              <div class="flex items-center justify-between border rounded-lg p-4 bg-background">
-                <div>
-                  <Label class="font-medium">uTLS</Label>
-                  <p class="text-sm text-muted-foreground">客户端伪装指纹，用于降低被识别风险</p>
-                </div>
-                <Switch v-model="netSettings.utls_enabled" />
-              </div>
-            </div>
-            <div v-if="editing.security === 'reality'" class="grid gap-3 border rounded-lg p-4 bg-muted/30">
-            </div>
-
-            <!-- 传输协议选择 -->
+          <div class="grid grid-cols-3 gap-4">
             <div class="grid gap-2">
-              <div class="flex items-center gap-2"><Label>传输协议</Label><Button variant="link" size="sm" class="h-auto p-0 text-sm" @click="openProtocolEdit">编辑协议</Button></div>
-              <Select v-model="editing.transport">
-                <SelectTrigger><SelectValue placeholder="选择传输协议" /></SelectTrigger>
+              <Label>权限组</Label>
+              <Select v-model="editing.group_id">
+                <SelectTrigger><SelectValue placeholder="无" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem v-for="t in vlessTransports" :key="t.value" :value="t.value">{{ t.label }}</SelectItem>
+                  <SelectItem :value="null">无</SelectItem>
+                  <SelectItem v-for="g in groups" :key="g.id" :value="g.id">{{ g.name }}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
-
-          </template>
-
-          <!-- ========== Hysteria2 协议参数 ========== -->
-          <template v-else-if="editing.protocol === 'hysteria2'">
-            <Separator />
-            <div class="flex items-center gap-2 mb-2">
-              <Settings class="h-4 w-4" />
-              <Label class="text-base font-semibold">Hysteria2 协议参数</Label>
-            </div>
-
-            <!-- 协议版本 + ALPN -->
-            <div class="grid grid-cols-2 gap-4">
-              <div class="grid gap-2">
-                <Label>协议版本</Label>
-                <Select v-model="netSettings.version">
-                  <SelectTrigger><SelectValue placeholder="V2" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem :value="1">V1</SelectItem>
-                    <SelectItem :value="2">V2</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div v-if="netSettings.version === 1" class="grid gap-2">
-                <Label>ALPN</Label>
-                <Select v-model="netSettings.alpn">
-                  <SelectTrigger><SelectValue placeholder="hysteria" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="hysteria">hysteria</SelectItem>
-                    <SelectItem value="http/1.1">http/1.1</SelectItem>
-                    <SelectItem value="h2">h2</SelectItem>
-                    <SelectItem value="h3">h3</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            <!-- 混淆 -->
-            <div class="border rounded-lg p-4">
-              <div class="flex items-center gap-4 mb-3">
-                <Label>混淆</Label>
-                <Switch v-model="netSettings.obfs_open" />
-                <Label class="text-sm text-muted-foreground">混淆实现</Label>
-              </div>
-              <div v-if="netSettings.obfs_open" class="grid grid-cols-2 gap-4">
-                <div class="grid gap-2">
-                  <Label>混淆实现</Label>
-                  <Select v-model="netSettings.obfs_type">
-                    <SelectTrigger><SelectValue placeholder="Salamander" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="salamander">Salamander</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div class="grid gap-2">
-                  <Label>混淆密码</Label>
-                  <div class="relative">
-                    <Input v-model="netSettings.obfs_password" placeholder="点击右侧按钮生成密码" class="pr-10" />
-                    <Button variant="ghost" size="sm" class="absolute right-0 top-0 h-full px-3" @click="netSettings.obfs_password = Math.random().toString(36).substring(2, 18)" title="生成密码">
-                      <RefreshCw class="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <!-- SNI + 允许不安全 -->
-            <div class="grid gap-3 border rounded-lg p-4 bg-muted/30">
-              <div class="grid gap-2">
-                <Label>服务器名称指示(SNI)</Label>
-                <Input v-model="netSettings.tls_server_name" placeholder="当节点地址于证书不一致时用于证书验证" />
-              </div>
-              <div class="flex items-center justify-between">
-                <Label class="text-sm text-muted-foreground">允许不安全?</Label>
-                <Switch v-model="netSettings.tls_allow_insecure" />
-              </div>
-            </div>
-
-            <!-- ECH -->
-            <div class="flex items-center justify-between border rounded-lg p-4">
-              <div>
-                <Label class="font-medium">ECH</Label>
-                <p class="text-sm text-muted-foreground">为支持的 TLS 客户端启用 Encrypted Client Hello。留空配置时会尝试通过 DNS 查询。</p>
-              </div>
-              <Switch v-model="netSettings.ech_enabled" />
-            </div>
-
-            <!-- 上行带宽 -->
             <div class="grid gap-2">
-              <Label>上行带宽</Label>
-              <div class="relative">
-                <Input v-model.number="netSettings.bandwidth_up" type="number" placeholder="请输入上行带宽，留空则使用BBR" class="pr-12" />
-                <span class="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground pointer-events-none">Mbps</span>
-              </div>
-            </div>
-
-            <!-- 下行带宽 -->
-            <div class="grid gap-2">
-              <Label>下行带宽</Label>
-              <div class="relative">
-                <Input v-model.number="netSettings.bandwidth_down" type="number" placeholder="请输入下行带宽，留空则使用BBR" class="pr-12" />
-                <span class="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground pointer-events-none">Mbps</span>
-              </div>
-            </div>
-
-            <!-- Hop 间隔 -->
-            <div class="grid gap-2">
-              <Label>Hop 间隔（秒）</Label>
-              <Input v-model.number="netSettings.hop_interval" type="number" placeholder="例如：30" />
-              <p class="text-xs text-muted-foreground">Hop 间隔时间，单位为秒</p>
-            </div>
-          </template>
-
-          <!-- ========== TUIC 协议参数 ========== -->
-          <template v-else-if="editing.protocol === 'tuic'">
-            <Separator />
-            <div class="flex items-center gap-2 mb-2">
-              <Settings class="h-4 w-4" />
-              <Label class="text-base font-semibold">TUIC 协议参数</Label>
-            </div>
-
-            <!-- 版本 -->
-            <div class="grid gap-2">
-              <Label>协议版本</Label>
-              <Select v-model="netSettings.tuic_version">
-                <SelectTrigger><SelectValue placeholder="5" /></SelectTrigger>
+              <Label>路由组</Label>
+              <Select v-model="editing.route_id">
+                <SelectTrigger><SelectValue placeholder="不绑定" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem :value="4">V4</SelectItem>
-                  <SelectItem :value="5">V5</SelectItem>
+                  <SelectItem :value="null">不绑定</SelectItem>
+                  <SelectItem v-for="r in routes" :key="r.id" :value="r.id">{{ r.name }}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
-
-            <!-- 拥塞控制 -->
-            <div class="grid gap-2">
-              <Label>拥塞控制</Label>
-              <Select v-model="netSettings.congestion_control">
-                <SelectTrigger><SelectValue placeholder="cubic" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="cubic">Cubic</SelectItem>
-                  <SelectItem value="bbr">BBR</SelectItem>
-                  <SelectItem value="new_reno">New Reno</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <!-- SNI + 允许不安全 -->
-            <div class="grid gap-3 border rounded-lg p-4 bg-muted/30">
-              <div class="grid gap-2">
-                <Label>服务器名称指示(SNI)</Label>
-                <Input v-model="netSettings.tls_server_name" placeholder="当节点地址与证书不一致时用于证书验证" />
-              </div>
-              <div class="flex items-center justify-between">
-                <Label class="text-sm text-muted-foreground">允许不安全?</Label>
-                <Switch v-model="netSettings.tls_allow_insecure" />
-              </div>
-            </div>
-
-            <!-- ECH -->
-            <div class="flex items-center justify-between border rounded-lg p-4">
-              <div>
-                <Label class="font-medium">ECH</Label>
-                <p class="text-sm text-muted-foreground">为支持的 TLS 客户端启用 Encrypted Client Hello。留空配置时会尝试通过 DNS 查询。</p>
-              </div>
-              <Switch v-model="netSettings.ech_enabled" />
-            </div>
-
-            <!-- ALPN (多选标签) -->
-            <div class="grid gap-2">
-              <Label>ALPN</Label>
-              <div class="border rounded-md p-2 flex flex-wrap gap-2 min-h-[38px] items-center">
-                <Badge v-for="(a, i) in tuicAlpnList" :key="i" variant="secondary" class="gap-1">
-                  {{ a }}
-                  <button class="ml-1 hover:text-destructive" @click="removeTuicAlpn(i)">×</button>
-                </Badge>
-                <Select v-model="tuicAlpnAdd" @update:modelValue="addTuicAlpn">
-                  <SelectTrigger class="w-auto border-0 h-6 p-0 shadow-none"><SelectValue placeholder="选择ALPN协议" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="h3">HTTP/3</SelectItem>
-                    <SelectItem value="h2">HTTP/2</SelectItem>
-                    <SelectItem value="http/1.1">HTTP/1.1</SelectItem>
-                    <SelectItem value="spdy/3.1">SPDY/3.1</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            <!-- UDP中继模式 -->
-            <div class="grid gap-2">
-              <Label>UDP中继模式</Label>
-              <Select v-model="netSettings.udp_relay_mode">
-                <SelectTrigger><SelectValue placeholder="native" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="native">Native</SelectItem>
-                  <SelectItem value="quic">QUIC</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <!-- Zero RTT + Heartbeat -->
-            <div class="grid grid-cols-2 gap-4">
-              <div class="flex items-center justify-between border rounded-lg p-4">
-                <div>
-                  <Label class="font-medium">Zero RTT</Label>
-                  <p class="text-sm text-muted-foreground">启用零往返握手</p>
-                </div>
-                <Switch v-model="netSettings.zero_rtt" />
-              </div>
-              <div class="grid gap-2">
-                <Label>Heartbeat</Label>
-                <Input v-model="netSettings.heartbeat" placeholder="10s" />
-              </div>
-            </div>
-          </template>
-
-          <!-- 未选择协议时的提示 -->
-          <div v-else class="border rounded-lg p-6 text-center text-muted-foreground">
-            <div class="flex flex-col items-center gap-2">
-              <div class="w-8 h-8 rounded-full bg-muted flex items-center justify-center text-lg">i</div>
-              <p>请先选择协议类型</p>
-            </div>
-          </div>
-
-          <!-- 父级节点 + 路由组 -->
-          <div class="grid grid-cols-2 gap-4">
             <div class="grid gap-2">
               <Label>父级节点</Label>
               <Select v-model="editing.parent_id">
@@ -914,18 +600,126 @@ onMounted(() => { fetchData(); fetchOptions() })
                 </SelectContent>
               </Select>
             </div>
-            <div class="grid gap-2">
-              <Label>路由组</Label>
-              <Select v-model="editing.route_id">
-                <SelectTrigger><SelectValue placeholder="选择路由组" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem :value="null">不绑定</SelectItem>
-                  <SelectItem v-for="r in routes" :key="r.id" :value="r.id">{{ r.name }}</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
           </div>
 
+          <!-- VLESS 协议参数 -->
+          <template v-if="editing.protocol === 'vless'">
+            <Separator />
+            <div class="flex items-center gap-2 mb-2">
+              <Settings class="h-4 w-4" />
+              <Label class="text-base font-semibold">VLESS 协议参数</Label>
+            </div>
+            <div class="grid gap-2">
+              <Label>Reality 公钥</Label>
+              <div class="flex gap-2">
+                <Input v-model="netSettings.reality_public_key" placeholder="由密钥生成器生成" class="flex-1" />
+                <Button variant="outline" size="sm" @click="handleGenerateRealityKeys">生成密钥对</Button>
+              </div>
+            </div>
+            <div class="grid grid-cols-2 gap-4">
+              <div class="grid gap-2">
+                <Label>Private Key</Label>
+                <Input v-model="netSettings.reality_private_key" placeholder="自动填入" class="font-mono text-sm" />
+              </div>
+              <div class="grid gap-2">
+                <Label>Short ID</Label>
+                <Input v-model="netSettings.reality_short_id" placeholder="留空自动生成" />
+              </div>
+            </div>
+            <div class="grid grid-cols-2 gap-4">
+              <div class="grid gap-2">
+                <Label>伪装域名 (SNI)</Label>
+                <Input v-model="netSettings.reality_server_name" placeholder="www.microsoft.com" />
+              </div>
+              <div class="grid gap-2">
+                <Label>Reality 端口</Label>
+                <Input v-model.number="netSettings.reality_port" type="number" placeholder="443" />
+              </div>
+            </div>
+          </template>
+
+          <!-- Hysteria2 协议参数 -->
+          <template v-else-if="editing.protocol === 'hysteria2'">
+            <Separator />
+            <div class="flex items-center gap-2 mb-2">
+              <Settings class="h-4 w-4" />
+              <Label class="text-base font-semibold">Hysteria2 协议参数</Label>
+            </div>
+            <div class="grid grid-cols-2 gap-4">
+              <div class="grid gap-2">
+                <Label>上行带宽 (Mbps)</Label>
+                <Input v-model.number="netSettings.bandwidth_up" type="number" placeholder="100" />
+              </div>
+              <div class="grid gap-2">
+                <Label>下行带宽 (Mbps)</Label>
+                <Input v-model.number="netSettings.bandwidth_down" type="number" placeholder="500" />
+              </div>
+            </div>
+            <div class="grid gap-2">
+              <Label>混淆密码</Label>
+              <Input v-model="netSettings.obfs_password" placeholder="留空不使用混淆" />
+            </div>
+          </template>
+
+          <!-- TUIC 协议参数 -->
+          <template v-else-if="editing.protocol === 'tuic'">
+            <Separator />
+            <div class="flex items-center gap-2 mb-2">
+              <Settings class="h-4 w-4" />
+              <Label class="text-base font-semibold">TUIC 协议参数</Label>
+            </div>
+            <div class="grid grid-cols-2 gap-4">
+              <div class="grid gap-2">
+                <Label>协议版本</Label>
+                <Select v-model="netSettings.tuic_version">
+                  <SelectTrigger><SelectValue placeholder="5" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem :value="4">V4</SelectItem>
+                    <SelectItem :value="5">V5</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div class="grid gap-2">
+                <Label>拥塞控制</Label>
+                <Select v-model="netSettings.congestion_control">
+                  <SelectTrigger><SelectValue placeholder="cubic" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="cubic">Cubic</SelectItem>
+                    <SelectItem value="bbr">BBR</SelectItem>
+                    <SelectItem value="new_reno">New Reno</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div class="grid gap-2">
+              <Label>服务器名称指示 (SNI)</Label>
+              <Input v-model="netSettings.tls_server_name" placeholder="当节点地址与证书不一致时用于证书验证" />
+            </div>
+            <div class="grid gap-2">
+              <Label>ALPN</Label>
+              <div class="border rounded-md p-2 flex flex-wrap gap-2 min-h-[38px] items-center">
+                <Badge v-for="(a, i) in tuicAlpnList" :key="i" variant="secondary" class="gap-1">
+                  {{ a }}
+                  <button class="ml-1 hover:text-destructive" @click="removeTuicAlpn(i)">x</button>
+                </Badge>
+                <Select v-model="tuicAlpnAdd" @update:modelValue="addTuicAlpn">
+                  <SelectTrigger class="w-auto border-0 h-6 p-0 shadow-none"><SelectValue placeholder="选择ALPN协议" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="h3">HTTP/3</SelectItem>
+                    <SelectItem value="h2">HTTP/2</SelectItem>
+                    <SelectItem value="http/1.1">HTTP/1.1</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </template>
+
+          <div v-else class="border rounded-lg p-6 text-center text-muted-foreground">
+            <div class="flex flex-col items-center gap-2">
+              <div class="w-8 h-8 rounded-full bg-muted flex items-center justify-center text-lg">i</div>
+              <p>请先选择协议类型</p>
+            </div>
+          </div>
 
         </div>
 
@@ -942,7 +736,6 @@ onMounted(() => { fetchData(); fetchOptions() })
       </DialogContent>
     </Dialog>
 
-
     <!-- 高级协议配置弹窗 -->
     <Dialog v-model:open="advancedOpen">
       <DialogContent class="!w-full !max-w-[800px] !max-h-[85vh] overflow-y-auto overflow-x-hidden">
@@ -958,16 +751,15 @@ onMounted(() => { fetchData(); fetchOptions() })
             <TabsTrigger value="routes">自定义 Routes</TabsTrigger>
           </TabsList>
 
-          <!-- TLS 证书 Tab -->
+          <!-- TLS Tab -->
           <TabsContent value="tls" class="grid gap-4 py-4">
             <div class="grid gap-2">
               <Label>证书模式</Label>
-              <p class="text-xs text-muted-foreground">选择证书申请方式，仅部分后端节点支持</p>
               <Select v-model="advancedTls.cert_mode">
                 <SelectTrigger class="w-full truncate"><SelectValue placeholder="选择证书模式" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">none - 未启用 TLS 证书配置</SelectItem>
-                  <SelectItem value="self">自签名模式 - 证书由节点后端自动生成（10年有效期）</SelectItem>
+                  <SelectItem value="self">自签名校验 - 证书由节点后端自动生成（10年有效期）</SelectItem>
                   <SelectItem value="http-01">HTTP-01 模式 - 需要 80 端口可正常访问以完成认证</SelectItem>
                   <SelectItem value="dns-01">DNS-01 模式 - 通过 DNS 解析记录认证，支持申请泛域名证书</SelectItem>
                   <SelectItem value="manual">内容推送模式 - 直接将证书内容下发至节点</SelectItem>
@@ -975,7 +767,6 @@ onMounted(() => { fetchData(); fetchOptions() })
               </Select>
             </div>
 
-            <!-- 所有非none模式都需要域名 -->
             <template v-if="advancedTls.cert_mode !== 'none'">
               <div class="grid gap-2">
                 <Label>证书域名</Label>
@@ -983,7 +774,6 @@ onMounted(() => { fetchData(); fetchOptions() })
               </div>
             </template>
 
-            <!-- HTTP-01 和 DNS-01 模式才需要通知邮箱 -->
             <template v-if="advancedTls.cert_mode === 'http-01' || advancedTls.cert_mode === 'dns-01'">
               <div class="grid gap-2">
                 <Label>通知邮箱</Label>
@@ -991,45 +781,38 @@ onMounted(() => { fetchData(); fetchOptions() })
               </div>
             </template>
 
-            <!-- HTTP-01 模式特殊字段 -->
             <template v-if="advancedTls.cert_mode === 'http-01'">
               <div class="grid gap-2">
                 <Label>认证端口</Label>
                 <Input v-model="advancedTls.http_port" type="number" placeholder="80" />
-                <p class="text-xs text-muted-foreground">ACME 认证端口，默认 80</p>
               </div>
             </template>
 
-            <!-- DNS-01 模式特殊字段 -->
             <template v-if="advancedTls.cert_mode === 'dns-01'">
               <div class="grid gap-2">
                 <Label>DNS 提供商</Label>
                 <Input v-model="advancedTls.dns_provider" placeholder="选择 DNS 提供商" />
-                <p class="text-xs text-muted-foreground">查看 DNS 提供商配置指南</p>
               </div>
               <div class="grid gap-2">
                 <Label>环境变量 (API 密钥)</Label>
                 <Textarea v-model="advancedTls.dns_env" rows="3" placeholder="KEY=VALUE" class="font-mono text-sm" />
-                <p class="text-xs text-muted-foreground">每行一个 KEY=VALUE 配置</p>
               </div>
             </template>
 
-            <!-- 手动模式特殊字段 -->
             <template v-if="advancedTls.cert_mode === 'manual'">
               <div class="grid gap-2">
                 <Label>证书内容 (Public Key)</Label>
-                <Textarea v-model="advancedTls.cert_content" rows="4" placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----" class="font-mono text-sm" />
+                <Textarea v-model="advancedTls.cert_content" rows="4" placeholder="-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----" class="font-mono text-sm" />
               </div>
               <div class="grid gap-2">
                 <Label>密钥内容 (Private Key)</Label>
-                <Textarea v-model="advancedTls.key_content" rows="4" placeholder="-----BEGIN PRIVATE KEY-----&#10;...&#10;-----END PRIVATE KEY-----" class="font-mono text-sm" />
+                <Textarea v-model="advancedTls.key_content" rows="4" placeholder="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----" class="font-mono text-sm" />
               </div>
             </template>
           </TabsContent>
 
-          <!-- 多路复用 Tab (VLESS only) -->
+          <!-- Multiplex Tab (VLESS only) -->
           <TabsContent v-if="editing.protocol === 'vless'" value="multiplex" class="grid gap-4 py-4">
-            <!-- 启用开关 -->
             <div class="flex items-center justify-between border rounded-lg p-4 bg-muted/30">
               <div>
                 <Label class="font-medium">多路复用 (Multiplex)</Label>
@@ -1037,9 +820,7 @@ onMounted(() => { fetchData(); fetchOptions() })
               </div>
               <Switch v-model="multiplex.enabled" />
             </div>
-
             <template v-if="multiplex.enabled">
-              <!-- 复用协议 + 填充 -->
               <div class="grid grid-cols-3 gap-4">
                 <div class="grid gap-2">
                   <Label>复用协议</Label>
@@ -1057,8 +838,6 @@ onMounted(() => { fetchData(); fetchOptions() })
                   <Label class="text-sm whitespace-nowrap">启用填充</Label>
                 </div>
               </div>
-
-              <!-- 最大连接数 + 最小流数 -->
               <div class="grid grid-cols-2 gap-4">
                 <div class="grid gap-2">
                   <Label>最大连接数</Label>
@@ -1069,103 +848,46 @@ onMounted(() => { fetchData(); fetchOptions() })
                   <Input v-model.number="multiplex.min_streams" type="number" min="1" placeholder="4" />
                 </div>
               </div>
-
-              <!-- TCP Brutal -->
-              <div class="border rounded-lg p-4 bg-muted/30">
-                <div class="flex items-center justify-between mb-3">
-                  <div>
-                    <Label class="font-medium">TCP Brutal (激进拥塞控制)</Label>
-                    <p class="text-xs text-muted-foreground">双边加速算法，建议带宽设为机器实际带宽的 80%-90%，开启后 BBR 将失效</p>
-                  </div>
-                  <Switch v-model="multiplex.brutal_enabled" />
-                </div>
-                <div v-if="multiplex.brutal_enabled" class="grid grid-cols-2 gap-4">
-                  <div class="grid gap-2">
-                    <Label>上行带宽 (Mbps)</Label>
-                    <Input v-model.number="multiplex.brutal_up_mbps" type="number" min="1" placeholder="请输入上行带宽" />
-                  </div>
-                  <div class="grid gap-2">
-                    <Label>下行带宽 (Mbps)</Label>
-                    <Input v-model.number="multiplex.brutal_down_mbps" type="number" min="1" placeholder="请输入下行带宽" />
-                  </div>
-                </div>
-              </div>
             </template>
           </TabsContent>
 
-          <!-- 自定义 Outbounds Tab -->
+          <!-- Custom Outbounds Tab -->
           <TabsContent value="outbounds" class="grid gap-4 py-4">
             <div class="border rounded-lg p-4 bg-muted/30">
-              <div class="flex items-center justify-between mb-2">
-                <div>
-                  <Label class="font-medium">自定义 Outbounds</Label>
-                  <p class="text-xs text-muted-foreground mt-1">配置自定义出站规则，内容会合并到 sing-box 的 outbounds 配置中</p>
-                </div>
-                <Button variant="outline" size="sm" @click="advancedOutbounds = JSON.stringify(JSON.parse(advancedOutbounds || '[]'), null, 2)" :disabled="!advancedOutbounds.trim()">JSON 格式化</Button>
-              </div>
-              <Textarea v-model="advancedOutbounds" rows="8" class="font-mono text-sm bg-background" placeholder='[
-  {
-    "type": "direct",
-    "tag": "direct-out"
-  }
-]' />
+              <Label class="font-medium">自定义 Outbounds</Label>
+              <Textarea v-model="advancedOutbounds" rows="8" class="font-mono text-sm bg-background mt-2" placeholder='[{\n  "type": "direct",\n  "tag": "direct-out"\n}]' />
             </div>
           </TabsContent>
 
-          <!-- 自定义 Routes Tab -->
+          <!-- Custom Routes Tab -->
           <TabsContent value="routes" class="grid gap-4 py-4">
             <div class="border rounded-lg p-4 bg-muted/30">
-              <div class="flex items-center justify-between mb-2">
-                <div>
-                  <Label class="font-medium">自定义 Routes</Label>
-                  <p class="text-xs text-muted-foreground mt-1">配置自定义路由规则，内容会合并到 sing-box 的 route 配置中</p>
-                </div>
-                <Button variant="outline" size="sm" @click="advancedRoutes = JSON.stringify(JSON.parse(advancedRoutes || '[]'), null, 2)" :disabled="!advancedRoutes.trim()">JSON 格式化</Button>
-              </div>
-              <Textarea v-model="advancedRoutes" rows="8" class="font-mono text-sm bg-background" placeholder='[
-  {
-    "type": "field",
-    "outbound": "any",
-    "domain": ["geosite:cn"]
-  }
-]' />
+              <Label class="font-medium">自定义 Routes</Label>
+              <Textarea v-model="advancedRoutes" rows="8" class="font-mono text-sm bg-background mt-2" placeholder='[{\n  "type": "field",\n  "outbound": "any",\n  "domain": ["geosite:cn"]\n}]' />
             </div>
           </TabsContent>
         </Tabs>
 
         <DialogFooter class="flex items-center justify-end gap-2 pt-2 border-t shrink-0">
           <Button variant="outline" @click="advancedOpen = false">取消</Button>
-          <Button @click="saveAdvanced">Save</Button>
+          <Button @click="saveAdvanced">保存</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <!-- 重置流量确认弹窗 -->
+    <Dialog v-model:open="resetTrafficDialogOpen">
+      <DialogContent>
+        <DialogHeader><DialogTitle>确认重置流量</DialogTitle></DialogHeader>
+        <DialogDescription>确定要将节点「{{ editing.name }}」的流量统计重置为零吗？此操作不可撤销。</DialogDescription>
+        <DialogFooter>
+          <Button variant="outline" @click="resetTrafficDialogOpen = false">取消</Button>
+          <Button variant="destructive" @click="handleResetTraffic">重置</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
 
     <!-- 删除确认弹窗 -->
-
-    <!-- 编辑协议配置弹窗 -->
-    <Dialog v-model:open="protocolEditOpen">
-      <DialogContent class="max-w-lg">
-        <DialogHeader>
-          <DialogTitle>编辑协议配置</DialogTitle>
-        </DialogHeader>
-        <div class="grid gap-4 py-2">
-          <div class="flex flex-wrap gap-2">
-            <Button
-              v-for="t in (transportTemplates[editing.transport || 'tcp'] || [])"
-              :key="t.label" variant="outline" size="sm"
-              @click="applyTransportTemplate(t.json)">
-              {{ t.label }}
-            </Button>
-          </div>
-          <Textarea v-model="protocolJson" rows="12" placeholder="请输入JSON配置或选择上方模板" class="font-mono text-sm" />
-        </div>
-        <DialogFooter>
-          <Button variant="outline" @click="protocolEditOpen = false">取消</Button>
-          <Button @click="saveProtocolEdit">确定</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-
     <Dialog v-model:open="deleteDialogOpen">
       <DialogContent>
         <DialogHeader><DialogTitle>确认删除</DialogTitle></DialogHeader>
