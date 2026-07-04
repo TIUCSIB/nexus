@@ -12,22 +12,10 @@ import (
 	"nexus/internal/service"
 
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
 // ---------- Request / Response types ----------
-
-type agentRegisterReq struct {
-	Name    string `json:"name" binding:"required"`
-	Address string `json:"address" binding:"required"`
-	Token   string `json:"token" binding:"required"`
-}
-
-type agentRegisterResp struct {
-	NodeID    uint   `json:"node_id"`
-	AuthToken string `json:"auth_token"`
-}
 
 type agentHeartbeatReq struct {
 	CPU    float64 `json:"cpu"`
@@ -51,26 +39,24 @@ type agentTrafficEntry struct {
 	Download int64  `json:"download"`
 }
 
-type agentTrafficReq struct {
-	NodeID  uint                 `json:"node_id" binding:"required"`
-	Entries []agentTrafficEntry  `json:"entries" binding:"required"`
-}
-
 type agentAliveReq struct {
-	NodeID string            `json:"node_id" binding:"required"`
-	Data   map[string][]string `json:"data" binding:"required"`
+	Data map[string][]string `json:"data" binding:"required"`
 }
 
 type agentAliveResp struct {
 	Alive map[string]int `json:"alive"`
 }
 
-// ---------- Middleware: agent token auth ----------
+// ---------- Middleware: server token auth ----------
 
-// AgentAuthMiddleware validates the X-Node-Token header and injects node info into context.
-func AgentAuthMiddleware() gin.HandlerFunc {
+// ServerAuthMiddleware validates the global server_token and injects node_id into context.
+// Token is sent via X-Node-Token header, node_id is extracted from the URL path.
+func ServerAuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		token := c.GetHeader("X-Node-Token")
+		if token == "" {
+			token = c.Query("token")
+		}
 		if token == "" {
 			c.JSON(http.StatusUnauthorized, gin.H{
 				"code":    -1,
@@ -80,86 +66,35 @@ func AgentAuthMiddleware() gin.HandlerFunc {
 			return
 		}
 
-		var nodeAuth model.NodeAuth
-		if err := database.DB.Where("auth_token = ?", token).First(&nodeAuth).Error; err != nil {
-			c.JSON(http.StatusUnauthorized, gin.H{
+		serverToken := database.GetSetting("server_token")
+		if serverToken == "" {
+			c.JSON(http.StatusInternalServerError, gin.H{
 				"code":    -1,
-				"message": "invalid auth token",
+				"message": "server_token not configured",
 			})
 			c.Abort()
 			return
 		}
 
-		c.Set("node_id", nodeAuth.NodeID)
+		if token != serverToken {
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"code":    -1,
+				"message": "invalid server token",
+			})
+			c.Abort()
+			return
+		}
+
 		c.Next()
 	}
 }
 
 // ---------- Handlers ----------
 
-// AgentRegister handles agent registration.
-// POST /api/v1/internal/agent/register
-func AgentRegister(c *gin.Context) {
-	var req agentRegisterReq
-	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, "invalid request: "+err.Error())
-		return
-	}
-
-	// Find node by register token
-	var node model.Node
-	if err := database.DB.Where("register_token = ?", req.Token).First(&node).Error; err != nil {
-		Unauthorized(c, "invalid register token")
-		return
-	}
-
-	// Check if node is already registered (has an auth token)
-	var existingAuth model.NodeAuth
-	err := database.DB.Where("node_id = ?", node.ID).First(&existingAuth).Error
-	if err == nil {
-		// Already registered - update node info and return existing token
-		database.DB.Model(&node).Updates(map[string]interface{}{
-			"name":    req.Name,
-			"address": req.Address,
-			"online":  true,
-		})
-		Success(c, agentRegisterResp{
-			NodeID:    node.ID,
-			AuthToken: existingAuth.AuthToken,
-		})
-		log.Printf("[agent] node %d re-registered as %q", node.ID, req.Name)
-		return
-	}
-
-	// First-time registration: create auth token
-	authToken := uuid.New().String()
-	nodeAuth := model.NodeAuth{
-		NodeID:    node.ID,
-		AuthToken: authToken,
-	}
-	if err := database.DB.Create(&nodeAuth).Error; err != nil {
-		InternalError(c, "failed to create auth token")
-		return
-	}
-
-	// Update node info
-	database.DB.Model(&node).Updates(map[string]interface{}{
-		"name":    req.Name,
-		"address": req.Address,
-		"online":  true,
-	})
-
-	log.Printf("[agent] node %d registered as %q", node.ID, req.Name)
-	Success(c, agentRegisterResp{
-		NodeID:    node.ID,
-		AuthToken: authToken,
-	})
-}
-
 // AgentHeartbeat handles periodic agent heartbeats.
-// POST /api/v1/internal/agent/heartbeat
+// POST /api/internal/agent/:node_id/heartbeat
 func AgentHeartbeat(c *gin.Context) {
-	nodeID := c.MustGet("node_id").(uint)
+	nodeID := c.Param("node_id")
 
 	var req agentHeartbeatReq
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -178,6 +113,11 @@ func AgentHeartbeat(c *gin.Context) {
 		return
 	}
 
+	if result.RowsAffected == 0 {
+		NotFound(c, "node not found")
+		return
+	}
+
 	// Check if config has been updated since last heartbeat.
 	var node model.Node
 	configChanged := false
@@ -193,9 +133,9 @@ func AgentHeartbeat(c *gin.Context) {
 }
 
 // AgentGetConfig returns the sing-box configuration for the requesting node.
-// GET /api/v1/internal/agent/config
+// GET /api/internal/agent/:node_id/config
 func AgentGetConfig(c *gin.Context) {
-	nodeID := c.MustGet("node_id").(uint)
+	nodeID := c.Param("node_id")
 
 	var node model.Node
 	if err := database.DB.First(&node, nodeID).Error; err != nil {
@@ -228,19 +168,29 @@ func AgentGetConfig(c *gin.Context) {
 }
 
 // AgentReportTraffic records traffic data from the agent (delta mode).
-// POST /api/v1/internal/agent/traffic
+// POST /api/internal/agent/:node_id/traffic
 func AgentReportTraffic(c *gin.Context) {
-	nodeID := c.MustGet("node_id").(uint)
+	nodeID := c.Param("node_id")
 
-	var req agentTrafficReq
+	var req agentTrafficEntry
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, "invalid request: "+err.Error())
+		// Try array format for backwards compatibility
+		var entries []agentTrafficEntry
+		if err2 := c.ShouldBindJSON(&entries); err2 != nil {
+			BadRequest(c, "invalid request: "+err.Error())
+			return
+		}
+		processTrafficEntries(c, nodeID, entries)
 		return
 	}
 
+	processTrafficEntries(c, nodeID, []agentTrafficEntry{req})
+}
+
+func processTrafficEntries(c *gin.Context, nodeID string, entries []agentTrafficEntry) {
 	now := time.Now()
 	recorded := 0
-	for _, entry := range req.Entries {
+	for _, entry := range entries {
 		// Look up user by UUID
 		var user model.User
 		if err := database.DB.Where("uuid = ?", entry.UserUUID).First(&user).Error; err != nil {
@@ -250,7 +200,7 @@ func AgentReportTraffic(c *gin.Context) {
 		// Record traffic log
 		trafficLog := model.TrafficLog{
 			UserID:     user.ID,
-			NodeID:     nodeID,
+			NodeID:     parseNodeID(nodeID),
 			Upload:     entry.Upload,
 			Download:   entry.Download,
 			RecordedAt: now,
@@ -269,14 +219,14 @@ func AgentReportTraffic(c *gin.Context) {
 		recorded++
 	}
 
-	log.Printf("[agent] recorded traffic for %d users (node %d)", recorded, nodeID)
+	log.Printf("[agent] recorded traffic for %d users (node %s)", recorded, nodeID)
 	Success(c, nil)
 }
 
 // AgentReportAlive receives online IP data from agents.
-// POST /api/v1/internal/agent/alive
+// POST /api/internal/agent/:node_id/alive
 func AgentReportAlive(c *gin.Context) {
-	nodeID := c.MustGet("node_id").(uint)
+	nodeID := c.Param("node_id")
 
 	var req agentAliveReq
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -301,7 +251,7 @@ func AgentReportAlive(c *gin.Context) {
 
 		// Upsert alive IP record for this user+node combination
 		var existing model.AliveIP
-		err = database.DB.Where("user_id = ? AND node_id = ?", user.ID, nodeID).First(&existing).Error
+		err = database.DB.Where("user_id = ? AND node_id = ?", user.ID, parseNodeID(nodeID)).First(&existing).Error
 		if err == nil {
 			// Update existing record
 			database.DB.Model(&existing).Updates(map[string]interface{}{
@@ -312,7 +262,7 @@ func AgentReportAlive(c *gin.Context) {
 			// Create new record
 			aliveIP := model.AliveIP{
 				UserID:    user.ID,
-				NodeID:    nodeID,
+				NodeID:    parseNodeID(nodeID),
 				IPs:       string(ipsJSON),
 				UpdatedAt: now,
 			}
@@ -325,12 +275,12 @@ func AgentReportAlive(c *gin.Context) {
 	staleThreshold := now.Add(-120 * time.Second)
 	database.DB.Where("updated_at < ?", staleThreshold).Delete(&model.AliveIP{})
 
-	log.Printf("[agent] processed alive data for %d users (node %d)", processed, nodeID)
+	log.Printf("[agent] processed alive data for %d users (node %s)", processed, nodeID)
 	Success(c, nil)
 }
 
 // AgentGetAliveList returns count of online IPs per user (only for users with device_limit > 0).
-// GET /api/v1/internal/agent/alivelist
+// GET /api/internal/agent/alivelist
 func AgentGetAliveList(c *gin.Context) {
 	// Find all alive records for users with device_limit > 0
 	var results []struct {
@@ -420,4 +370,11 @@ func buildRoutesJSON() string {
 	}
 	result += "]"
 	return result
+}
+
+// parseNodeID parses a node ID string to uint, returns 0 on error.
+func parseNodeID(id string) uint {
+	var n uint
+	fmt.Sscanf(id, "%d", &n)
+	return n
 }

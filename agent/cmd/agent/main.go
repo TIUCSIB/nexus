@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	
 	"fmt"
 	"log"
 	"os"
@@ -35,16 +34,26 @@ func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	log.Printf("Nexus Agent starting...")
 
-	// Load configuration: supports CLI flags and environment variables.
-	// Quick mode: ./agent --panel URL --token TOKEN
-	// Env mode: NEXUS_PANEL_URL, NEXUS_TOKEN, NEXUS_NODE_NAME
-	cfg, err := config.LoadWithCLI(os.Args)
+	// Load configuration from YAML
+	cfgPath := "agent.yaml"
+	if len(os.Args) > 1 && os.Args[1] == "-config" && len(os.Args) > 2 {
+		cfgPath = os.Args[2]
+	} else if len(os.Args) > 1 && !strings.HasPrefix(os.Args[1], "-") {
+		cfgPath = os.Args[1]
+	}
+
+	cfg, err := config.Load(cfgPath)
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
 	}
 
+	if err := cfg.Validate(); err != nil {
+		log.Fatalf("Invalid config: %v", err)
+	}
+
 	// Create shared HTTP client for panel communication
-	panelClient := httpclient.NewClient(cfg.Panel)
+	panelURL := cfg.Panel.URL
+	panelToken := cfg.Panel.Token
 
 	// Set up signal handling for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
@@ -59,7 +68,7 @@ func main() {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			runNode(ctx, panelClient, nodeCfg)
+			runNode(ctx, panelURL, panelToken, nodeCfg)
 		}()
 	}
 
@@ -72,39 +81,31 @@ func main() {
 }
 
 // runNode manages the full lifecycle of a single proxy node.
-func runNode(ctx context.Context, client *httpclient.Client, nodeCfg config.NodeConfig) {
-	nodeName := nodeCfg.Name
-	if nodeName == "" {
-		nodeName = nodeCfg.Address
-	}
-	prefix := fmt.Sprintf("[node:%s] ", nodeName)
+func runNode(ctx context.Context, panelURL, panelToken string, nodeCfg config.NodeConfig) {
+	prefix := fmt.Sprintf("[node:%d] ", nodeCfg.NodeID)
+
+	// Create panel client with node_id
+	client := httpclient.NewClient(panelURL, panelToken, nodeCfg.NodeID)
 
 	// Determine node address
 	addr := nodeCfg.Address
-	if addr == "" {
-		addr = "auto"
+	if addr == "" || addr == "auto" {
+		addr = "0.0.0.0"
 	}
-
-	// Register with panel
-	log.Printf("%sRegistering with panel...", prefix)
-	nodeID, authToken, err := client.Register(nodeName, addr, nodeCfg.Token)
-	if err != nil {
-		log.Printf("%sFailed to register: %v", prefix, err)
-		return
-	}
-	log.Printf("%sRegistered successfully: node_id=%d", prefix, nodeID)
 
 	// Create sing-box manager and stats collector
 	sbManager := proxy.New(nodeCfg.Singbox)
-	statsCol := collector.New(nodeCfg.Singbox.StatsURL, nodeID)
+	statsCol := collector.New(nodeCfg.Singbox.StatsURL, uint(nodeCfg.NodeID))
 
-	// Pull initial configuration with timeout
-	configJSON, err := pullConfigWithTimeout(ctx, client, authToken, prefix)
+	// Pull initial configuration
+	log.Printf("%sFetching initial config...", prefix)
+	configJSON, usersJSON, routesJSON, err := client.GetConfig()
 	if err != nil {
 		log.Printf("%sFailed to get initial config: %v", prefix, err)
 	} else if strings.TrimSpace(configJSON) == "" || configJSON == "{}" {
 		log.Printf("%sPanel returned empty config, waiting for admin to configure...", prefix)
 	} else {
+		log.Printf("%sConfig received (users=%s, routes=%s)", prefix, usersJSON, routesJSON)
 		if err := sbManager.Start(configJSON); err != nil {
 			log.Printf("%sFailed to start sing-box: %v", prefix, err)
 		} else {
@@ -115,7 +116,7 @@ func runNode(ctx context.Context, client *httpclient.Client, nodeCfg config.Node
 	// Start the sing-box watcher goroutine
 	watchCtx, watchCancel := context.WithCancel(ctx)
 	defer watchCancel()
-	go watchSingbox(watchCtx, sbManager, client, authToken, prefix)
+	go watchSingbox(watchCtx, sbManager, client, prefix)
 
 	// Tickers
 	heartbeatTicker := time.NewTicker(heartbeatInterval)
@@ -133,7 +134,7 @@ func runNode(ctx context.Context, client *httpclient.Client, nodeCfg config.Node
 	defer syncLimitsTicker.Stop()
 
 	// Initial device limit sync
-	if limits, err := client.FetchDeviceLimit(authToken); err == nil {
+	if limits, err := client.FetchDeviceLimit(); err == nil {
 		deviceLimitEnforcer.UpdateLimits(limits)
 		log.Printf("%sDevice limits synced: %d users with limits", prefix, len(limits))
 	}
@@ -158,7 +159,7 @@ func runNode(ctx context.Context, client *httpclient.Client, nodeCfg config.Node
 			cpu, mem := getSystemStats()
 			uptime := uint64(time.Since(startTime).Seconds())
 
-			configChanged, err := client.Heartbeat(authToken, cpu, mem, uptime)
+			configChanged, err := client.Heartbeat(cpu, mem, uptime)
 			if err != nil {
 				log.Printf("%sHeartbeat error: %v", prefix, err)
 				continue
@@ -167,7 +168,7 @@ func runNode(ctx context.Context, client *httpclient.Client, nodeCfg config.Node
 
 			if configChanged {
 				log.Printf("%sConfig change detected, pulling new config...", prefix)
-				newConfig, err := pullConfigWithTimeout(ctx, client, authToken, prefix)
+				newConfig, newUsers, newRoutes, err := client.GetConfig()
 				if err != nil {
 					configFailures++
 					log.Printf("%sConfig pull failed (%d/%d): %v", prefix, configFailures, maxConfigFailures, err)
@@ -195,7 +196,7 @@ func runNode(ctx context.Context, client *httpclient.Client, nodeCfg config.Node
 					if err := sbManager.Restart(newConfig); err != nil {
 						log.Printf("%sFailed to restart sing-box: %v", prefix, err)
 					} else {
-						log.Printf("%ssing-box restarted successfully", prefix)
+						log.Printf("%ssing-box restarted successfully (users=%s, routes=%s)", prefix, newUsers, newRoutes)
 					}
 				}
 			}
@@ -213,7 +214,7 @@ func runNode(ctx context.Context, client *httpclient.Client, nodeCfg config.Node
 				continue
 			}
 			log.Printf("%sCollected traffic stats for %d users", prefix, len(entries))
-			if err := client.ReportTraffic(authToken, entries); err != nil {
+			if err := client.ReportTraffic(entries); err != nil {
 				log.Printf("%sFailed to report traffic: %v", prefix, err)
 			}
 
@@ -230,7 +231,7 @@ func runNode(ctx context.Context, client *httpclient.Client, nodeCfg config.Node
 				continue
 			}
 			log.Printf("%sReporting alive IPs for %d users", prefix, len(aliveIPs))
-			if err := client.ReportAlive(nodeID, authToken, aliveIPs); err != nil {
+			if err := client.ReportAlive(aliveIPs); err != nil {
 				log.Printf("%sFailed to report alive IPs: %v", prefix, err)
 			}
 
@@ -248,7 +249,7 @@ func runNode(ctx context.Context, client *httpclient.Client, nodeCfg config.Node
 			}
 
 		case <-syncLimitsTicker.C:
-			limits, err := client.FetchDeviceLimit(authToken)
+			limits, err := client.FetchDeviceLimit()
 			if err != nil {
 				log.Printf("%sDevice limit sync error: %v", prefix, err)
 				continue
@@ -261,40 +262,9 @@ func runNode(ctx context.Context, client *httpclient.Client, nodeCfg config.Node
 	}
 }
 
-// pullConfigWithTimeout pulls the config from the panel with a 30-second timeout.
-func pullConfigWithTimeout(ctx context.Context, client *httpclient.Client, authToken, prefix string) (string, error) {
-	type result struct {
-		configJSON string
-		err        error
-	}
-
-	ch := make(chan result, 1)
-	go func() {
-		configJSON, _, changed, err := client.GetConfig(authToken)
-		if err != nil {
-			ch <- result{"", err}
-			return
-		}
-		if !changed {
-			ch <- result{"", nil}
-			return
-		}
-		ch <- result{configJSON, nil}
-	}()
-
-	select {
-	case <-ctx.Done():
-		return "", ctx.Err()
-	case <-time.After(configPullTimeout):
-		return "", fmt.Errorf("config pull timed out after %s", configPullTimeout)
-	case r := <-ch:
-		return r.configJSON, r.err
-	}
-}
-
 // watchSingbox monitors the sing-box process and restarts it with exponential backoff
 // if it exits unexpectedly. Checks every 5 seconds.
-func watchSingbox(ctx context.Context, sbManager *proxy.SingboxManager, client *httpclient.Client, authToken, prefix string) {
+func watchSingbox(ctx context.Context, sbManager *proxy.SingboxManager, client *httpclient.Client, prefix string) {
 	var consecutiveFailures int
 	maxBackoff := 2 * time.Minute
 
@@ -326,7 +296,7 @@ func watchSingbox(ctx context.Context, sbManager *proxy.SingboxManager, client *
 				}
 
 				// Pull latest config before restarting
-				configJSON, err := pullConfigWithTimeout(ctx, client, authToken, prefix)
+				configJSON, err := pullConfigWithTimeout(ctx, client, prefix)
 				if err != nil {
 					log.Printf("%sFailed to pull config for restart: %v", prefix, err)
 					wasRunning = false
@@ -353,6 +323,33 @@ func watchSingbox(ctx context.Context, sbManager *proxy.SingboxManager, client *
 
 			wasRunning = isRunning
 		}
+	}
+}
+
+// pullConfigWithTimeout pulls the config from the panel with a 30-second timeout.
+func pullConfigWithTimeout(ctx context.Context, client *httpclient.Client, prefix string) (string, error) {
+	type result struct {
+		configJSON string
+		err        error
+	}
+
+	ch := make(chan result, 1)
+	go func() {
+		configJSON, _, _, err := client.GetConfig()
+		if err != nil {
+			ch <- result{"", err}
+			return
+		}
+		ch <- result{configJSON, nil}
+	}()
+
+	select {
+	case <-ctx.Done():
+		return "", ctx.Err()
+	case <-time.After(configPullTimeout):
+		return "", fmt.Errorf("config pull timed out after %s", configPullTimeout)
+	case r := <-ch:
+		return r.configJSON, r.err
 	}
 }
 

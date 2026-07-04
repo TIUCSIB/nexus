@@ -47,20 +47,16 @@ func Setup() *gin.Engine {
 		nodes.GET("/:id/status", handler.NodeStatus)
 	}
 
-	// Agent communication (internal, token-based)
+	// Agent communication (internal, server_token-based)
 	agent := r.Group("/api/internal/agent")
+	agent.Use(handler.ServerAuthMiddleware())
 	{
-		agent.POST("/register", handler.AgentRegister)
-		agentAuth := agent.Group("")
-		agentAuth.Use(handler.AgentAuthMiddleware())
-		{
-			agentAuth.POST("/heartbeat", handler.AgentHeartbeat)
-			agentAuth.GET("/config", handler.AgentGetConfig)
-			agentAuth.POST("/traffic", handler.AgentReportTraffic)
-			agentAuth.POST("/alive", handler.AgentReportAlive)
-			agentAuth.GET("/alivelist", handler.AgentGetAliveList)
-			agentAuth.GET("/devicelimit", handler.AgentGetDeviceLimit)
-		}
+		agent.POST("/:node_id/heartbeat", handler.AgentHeartbeat)
+		agent.GET("/:node_id/config", handler.AgentGetConfig)
+		agent.POST("/:node_id/traffic", handler.AgentReportTraffic)
+		agent.POST("/:node_id/alive", handler.AgentReportAlive)
+		agent.GET("/alivelist", handler.AgentGetAliveList)
+		agent.GET("/devicelimit", handler.AgentGetDeviceLimit)
 	}
 
 	// Admin endpoints (JWT + admin required)

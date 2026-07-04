@@ -1,27 +1,12 @@
-# Nexus Agent Configuration
-# Deploy this file alongside the nexus-agent binary on each proxy node.
-
 panel:
-  # Panel HTTP address (the Nexus panel's public/internal address)
-  address: "http://localhost:8080"
+  url: "http://localhost:9091"
+  token: "b7b77076-d2e3-4e15-b956-68e5da42169f"
 
-# Multiple nodes can be managed by a single agent instance.
-# Each node runs its own sing-box process with independent registration, config, and stats.
 nodes:
-  - name: "Tokyo-01"
-    token: "register-token-1"
+  - node_id: 3
     address: "0.0.0.0"
     singbox:
       binary_path: "sing-box"
-      config_path: "singbox-1.json"
+      config_path: "singbox-3.json"
       working_dir: "."
-      stats_port: 9091
-
-  - name: "Singapore-01"
-    token: "register-token-2"
-    address: "0.0.0.0"
-    singbox:
-      binary_path: "sing-box"
-      config_path: "singbox-2.json"
-      working_dir: "."
-      stats_port: 9092
+      stats_port: 9093

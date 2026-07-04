@@ -41,7 +41,7 @@ func Init(cfg config.DatabaseConfig) error {
 	DB.Exec("PRAGMA journal_mode=WAL")
 	DB.Exec("PRAGMA busy_timeout=5000")
 
-	return DB.AutoMigrate(
+	if err := DB.AutoMigrate(
 		&model.User{},
 		&model.Plan{},
 		&model.Node{},
@@ -50,22 +50,41 @@ func Init(cfg config.DatabaseConfig) error {
 		&model.SystemConfig{},
 		&model.AliveIP{},
 		&model.RouteRule{},
-	)
+	); err != nil {
+		return err
+	}
+
+	// Initialize default server_token if not exists
+	initDefaultServerToken()
+
+	return nil
+}
+
+func initDefaultServerToken() {
+	var cfg model.SystemConfig
+	if err := DB.Where("key = ?", "server_token").First(&cfg).Error; err != nil {
+		// Not found, create default
+		DB.Create(&model.SystemConfig{
+			Key:   "server_token",
+			Value: uuid.New().String(),
+		})
+		fmt.Printf("Generated default server_token: %s\n", GetSetting("server_token"))
+	}
 }
 
 func CreateInitialAdmin() error {
 	reader := bufio.NewReader(os.Stdin)
 
-	fmt.Printf("请输入管理员邮箱: ")
+	fmt.Print("\u8bf7\u8f93\u5165\u7ba1\u7406\u5458\u90ae\u7bb1: ")
 	email, _ := reader.ReadString('\n')
 	email = strings.TrimSpace(email)
 
-	fmt.Printf("请输入管理员密码: ")
+	fmt.Print("\u8bf7\u8f93\u5165\u7ba1\u7406\u5458\u5bc6\u7801: ")
 	password, _ := reader.ReadString('\n')
 	password = strings.TrimSpace(password)
 
 	if email == "" || password == "" {
-		return fmt.Errorf("邮箱和密码不能为空")
+		return fmt.Errorf("email and password cannot be empty")
 	}
 
 	hash, err := crypto.HashPassword(password)
@@ -89,7 +108,7 @@ func CreateInitialAdmin() error {
 	}
 
 	_ = time.Now()
-	fmt.Printf("管理员账号 %s 创建成功\n", email)
+	fmt.Printf("admin %s created successfully\n", email)
 	return nil
 }
 
