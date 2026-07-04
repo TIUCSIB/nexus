@@ -39,6 +39,7 @@ type createNodeRequest struct {
 	Address         string  `json:"address" binding:"required"`
 	Protocol        string  `json:"protocol" binding:"required"`
 	Port            int     `json:"port" binding:"required"`
+	ServicePort     int     `json:"service_port"`
 	GroupID         *uint   `json:"group_id"`
 	RouteID         *uint   `json:"route_id"`
 	Rate            float64 `json:"rate"`
@@ -106,6 +107,7 @@ func AdminCreateNode(c *gin.Context) {
 		Address:         req.Address,
 		Protocol:        req.Protocol,
 		Port:            req.Port,
+			ServicePort:     req.ServicePort,
 		GroupID:         req.GroupID,
 		RouteID:         req.RouteID,
 		Rate:            rate,
@@ -141,6 +143,7 @@ type updateNodeRequest struct {
 	Address         string   `json:"address"`
 	Protocol        string   `json:"protocol"`
 	Port            *int     `json:"port"`
+	ServicePort     *int     `json:"service_port"`
 	GroupID         *uint    `json:"group_id"`
 	RouteID         *uint    `json:"route_id"`
 	Rate            *float64 `json:"rate"`
@@ -187,6 +190,9 @@ func AdminUpdateNode(c *gin.Context) {
 	}
 	if req.Port != nil {
 		updates["port"] = *req.Port
+	}
+	if req.ServicePort != nil {
+		updates["service_port"] = *req.ServicePort
 	}
 	if req.GroupID != nil {
 		updates["group_id"] = *req.GroupID
