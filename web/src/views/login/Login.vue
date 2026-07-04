@@ -14,11 +14,11 @@ const router = useRouter()
 const authStore = useAuthStore()
 const settingsStore = useSettingsStore()
 getSiteInfo().then((res: any) => {
-    if (res.code === 0 && res.data) {
-      if (res.data.app_name) { settingsStore.setAppName(res.data.app_name) }
-      if (res.data.app_description) { settingsStore.setAppDescription(res.data.app_description) }
-    }
-  }).catch(() => {})
+  if (res.code === 0 && res.data) {
+    if (res.data.app_name) { settingsStore.setAppName(res.data.app_name) }
+    if (res.data.app_description) { settingsStore.setAppDescription(res.data.app_description) }
+  }
+}).catch(() => { })
 
 const email = ref('')
 const password = ref('')
@@ -58,7 +58,7 @@ onMounted(() => {
   <div class="flex min-h-svh items-center justify-center bg-muted/40 p-4">
     <Card class="w-full max-w-sm">
       <CardHeader class="text-center">
-        <CardTitle class="text-2xl">{{ settingsStore.appName }} 代理面板</CardTitle>
+        <CardTitle class="text-2xl">{{ settingsStore.appName }}</CardTitle>
         <CardDescription v-if="settingsStore.appDescription">{{ settingsStore.appDescription }}</CardDescription>
         <CardDescription>请使用账号登录</CardDescription>
       </CardHeader>
@@ -70,7 +70,8 @@ onMounted(() => {
           </div>
           <div class="grid gap-2">
             <Label for="password">密码</Label>
-            <Input id="password" v-model="password" type="password" placeholder="请输入密码" autocomplete="current-password" />
+            <Input id="password" v-model="password" type="password" placeholder="请输入密码"
+              autocomplete="current-password" />
           </div>
           <p v-if="error" class="text-sm text-red-500">{{ error }}</p>
           <Button type="submit" class="w-full" :disabled="loading">

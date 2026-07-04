@@ -11,6 +11,8 @@ agent/go.sum
 node_modules/
 web/dist/
 web/package-lock.json
+.git-alt/
+.gocache/
 
 # Data
 data/

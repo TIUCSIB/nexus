@@ -236,12 +236,12 @@ func buildVLESSInbound(node nexusmodel.Node, users []nexusmodel.User) (vlessInbo
 		vUsers[i] = vlessUser{Name: u.Email, UUID: u.UUID}
 	}
 
-	return vlessInbound{
-		Type:       "vless",
-		Tag:        "vless-reality",
-		Listen:     "::",
-		ListenPort: node.Port,
-		Users:      vUsers,
+return vlessInbound{
+			Type:       "vless",
+			Tag:        "vless-reality",
+			Listen:     "::",
+			ListenPort: effectiveListenPort(node),
+			Users:      vUsers,
 		TLS: vlessTLS{
 			Enabled:    true,
 			ServerName: params.ServerName,
@@ -283,11 +283,11 @@ func buildHysteria2Inbound(node nexusmodel.Node, users []nexusmodel.User) (hyste
 		hyUsers[i] = hysteria2User{Name: u.Email, Password: pw}
 	}
 
-	in := hysteria2Inbound{
-		Type:       "hysteria2",
-		Tag:        "hysteria2-in",
-		Listen:     "::",
-		ListenPort: node.Port,
+in := hysteria2Inbound{
+			Type:       "hysteria2",
+			Tag:        "hysteria2-in",
+			Listen:     "::",
+			ListenPort: effectiveListenPort(node),
 		Users:      hyUsers,
 		TLS: hysteria2TLS{
 			Enabled:         true,
@@ -341,11 +341,11 @@ func buildTUICInbound(node nexusmodel.Node, users []nexusmodel.User) (tuicInboun
 		}
 	}
 
-	return tuicInbound{
-		Type:              "tuic",
-		Tag:               "tuic-in",
-		Listen:            "::",
-		ListenPort:        node.Port,
+return tuicInbound{
+			Type:              "tuic",
+			Tag:               "tuic-in",
+			Listen:            "::",
+			ListenPort:        effectiveListenPort(node),
 		Users:             tUsers,
 		CongestionControl: congestion,
 		TLS: tuicTLS{
@@ -395,6 +395,16 @@ func generateManualConfig(node nexusmodel.Node, users []nexusmodel.User) (string
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+// effectiveListenPort returns the port the sing-box should actually listen on.
+// If service_port is set, it takes priority; otherwise falls back to the
+// connection port (port).
+func effectiveListenPort(node nexusmodel.Node) int {
+	if node.ServicePort > 0 {
+		return node.ServicePort
+	}
+	return node.Port
+}
 
 func baseConfig() singboxConfig {
 	return singboxConfig{
