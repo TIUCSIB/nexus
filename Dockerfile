@@ -1,5 +1,13 @@
-# Stage 1: Build panel
-FROM golang:1.25-alpine AS builder
+# Stage 1: Build frontend
+FROM node:22-alpine AS frontend
+WORKDIR /app
+COPY web/package.json web/package-lock.json* ./
+RUN npm ci --omit=optional
+COPY web/ .
+RUN npm run build
+
+# Stage 2: Build panel
+FROM golang:1.24-alpine AS builder
 RUN apk add --no-cache gcc musl-dev sqlite-dev
 WORKDIR /app
 COPY go.mod go.sum ./
@@ -8,13 +16,14 @@ COPY . .
 RUN CGO_ENABLED=1 go build -o /app/nexus ./cmd/nexus
 RUN CGO_ENABLED=1 go build -o /app/nexus-agent ./agent/cmd/agent
 
-# Stage 2: Runtime image
+# Stage 3: Runtime image
 FROM alpine:3.21
 RUN apk add --no-cache ca-certificates sqlite wget bash
 WORKDIR /app
 
 COPY --from=builder /app/nexus .
 COPY --from=builder /app/nexus-agent .
+COPY --from=frontend /app/dist ./web/dist
 COPY config.yaml .
 
 # Create entrypoint script for first-run setup

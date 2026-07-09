@@ -10,11 +10,13 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { toast } from 'vue-sonner'
 import { getUser } from '@/api/user'
 import { getUserTrafficLogs, getUserOnlineIPs } from '@/api/trafficLog'
+import { useSettingsStore } from '@/stores/settings'
 import type { UserDetail } from '@/api/user'
 import type { TrafficLogEntry, OnlineIPEntry } from '@/api/trafficLog'
 
 const route = useRoute()
 const router = useRouter()
+const settingsStore = useSettingsStore()
 const detail = ref<UserDetail | null>(null)
 const loading = ref(true)
 const activeTab = ref('info')
@@ -41,6 +43,14 @@ const trafficPercent = computed(() => {
 const statusText = computed(() => {
   if (!detail.value) return ''
   return detail.value.user.status === 1 ? '启用' : '禁用'
+})
+
+const subUrl = computed(() => {
+  if (!detail.value) return ''
+  if (detail.value.sub_url) return detail.value.sub_url
+  const base = window.location.origin
+  const subPath = settingsStore.subPath
+  return base + '/' + subPath + '/' + detail.value.user.token
 })
 
 const statusVariant = computed(() => {
@@ -100,11 +110,9 @@ function onTabChange(tab: any) {
   if (tab === 'online-ips' && !onlineIPs.value.length) loadOnlineIPs(detail.value.user.id)
 }
 
-const formatLabels = ['sing-box', 'Clash', 'Surge', 'Surfboard', 'Shadowrocket', 'V2RayN']
-
 onMounted(async () => {
   const id = Number(route.params.id)
-  if (!id) { router.push('/admin/users'); return }
+  if (!id) { router.push(settingsStore.adminRoute('users')); return }
   try {
     const res = await getUser(id)
     if (res.code === 0) detail.value = res.data
@@ -116,9 +124,14 @@ onMounted(async () => {
 <template>
   <div class="space-y-6">
     <div class="flex items-center gap-3">
-      <Button variant="ghost" size="sm" @click="router.push('/admin/users')">&larr; 返回</Button>
+      <Button variant="ghost" size="sm" @click="router.push(settingsStore.adminRoute('users'))">&larr; 返回</Button>
       <h1 class="text-2xl font-bold" v-if="detail">用户详情 &mdash; {{ detail.user.email }}</h1>
       <div v-if="detail" class="ml-auto flex items-center gap-2">
+        <Badge v-if="detail.online" variant="default" class="bg-green-600">在线</Badge>
+        <Badge v-else variant="secondary">
+          离线
+          <span v-if="detail.last_seen" class="ml-1">· {{ formatDate(detail.last_seen) }}</span>
+        </Badge>
         <Badge :variant="statusVariant">{{ statusText }}</Badge>
         <Badge variant="outline">ID: {{ detail.user.id }}</Badge>
       </div>
@@ -284,16 +297,13 @@ onMounted(async () => {
               <CardTitle class="text-sm">订阅链接</CardTitle>
             </CardHeader>
             <CardContent class="space-y-3">
-              <div v-for="(link, i) in detail.links" :key="i" class="flex items-center gap-2">
-                <Badge variant="outline" class="w-24 shrink-0 justify-center">{{ formatLabels[i] }}</Badge>
-                <Input :model-value="link" readonly class="font-mono text-xs flex-1" />
-                <Button variant="outline" size="sm" class="shrink-0" @click="copyLink(link)">
+              <div class="flex items-center gap-2">
+                <Input :model-value="subUrl" readonly class="font-mono text-xs flex-1" />
+                <Button variant="outline" size="sm" class="shrink-0" @click="copyLink(subUrl)">
                   复制
                 </Button>
               </div>
-              <p v-if="!detail.links.length" class="text-muted-foreground text-center py-8">
-                暂无订阅链接
-              </p>
+              <p class="text-xs text-muted-foreground">客户端自动识别格式，支持 sing-box / Clash / Surge / Shadowrocket 等</p>
             </CardContent>
           </Card>
         </TabsContent>

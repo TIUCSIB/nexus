@@ -9,18 +9,52 @@ import (
 )
 
 type SubscriptionInfo struct {
-	User       model.User `json:"user"`
-	Plan       *model.Plan `json:"plan,omitempty"`
-	IsActive   bool       `json:"is_active"`
-	Expired    bool       `json:"expired"`
-	DaysLeft   int        `json:"days_left"`
+	User     model.User  `json:"user"`
+	Plan     *model.Plan `json:"plan,omitempty"`
+	IsActive bool        `json:"is_active"`
+	Expired  bool        `json:"expired"`
+	DaysLeft int         `json:"days_left"`
 }
 
 var (
-	ErrUserNotFound  = errors.New("用户不存在")
-	ErrUserDisabled  = errors.New("用户已被禁用")
-	ErrUserExpired   = errors.New("用户订阅已过期")
+	ErrUserNotFound         = errors.New("用户不存在")
+	ErrUserDisabled         = errors.New("用户已被禁用")
+	ErrUserExpired          = errors.New("用户订阅已过期")
+	ErrUserTrafficExhausted = errors.New("流量已用尽")
 )
+
+// CheckUserSubscriptionAvailable verifies whether a user is allowed to fetch
+// subscription content.
+func CheckUserSubscriptionAvailable(user *model.User) error {
+	if user == nil {
+		return ErrUserNotFound
+	}
+	if user.Status != 1 {
+		return ErrUserDisabled
+	}
+	if user.ExpiredAt != nil && !user.ExpiredAt.After(time.Now()) {
+		return ErrUserExpired
+	}
+	if user.TrafficLimit > 0 && user.TrafficUsed >= user.TrafficLimit {
+		return ErrUserTrafficExhausted
+	}
+	return nil
+}
+
+// SubscriptionUnavailableReason returns a user-facing reason for a failed
+// subscription availability check.
+func SubscriptionUnavailableReason(err error) string {
+	switch {
+	case errors.Is(err, ErrUserDisabled):
+		return "账号已被禁用"
+	case errors.Is(err, ErrUserExpired):
+		return "订阅已过期"
+	case errors.Is(err, ErrUserTrafficExhausted):
+		return "流量已用尽"
+	default:
+		return "订阅不可用"
+	}
+}
 
 // GetUserSubscriptionInfo 根据 Token 查询用户的订阅信息。
 // 返回用户详情、关联套餐，以及是否有效的状态判断。
@@ -46,17 +80,13 @@ func GetUserSubscriptionInfo(token string) (*SubscriptionInfo, error) {
 		}
 	}
 
-	// 判断用户是否有效：状态为 1 且未过期
-	if user.Status != 1 {
+	if err := CheckUserSubscriptionAvailable(&user); err != nil {
 		info.IsActive = false
-		return info, ErrUserDisabled
-	}
-
-	if user.ExpiredAt != nil && user.ExpiredAt.Before(time.Now()) {
-		info.IsActive = false
-		info.Expired = true
-		info.DaysLeft = 0
-		return info, ErrUserExpired
+		if errors.Is(err, ErrUserExpired) {
+			info.Expired = true
+			info.DaysLeft = 0
+		}
+		return info, err
 	}
 
 	info.IsActive = true

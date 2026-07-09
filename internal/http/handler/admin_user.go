@@ -1,20 +1,26 @@
 package handler
 
 import (
+	"fmt"
 	"strconv"
 	"time"
 
-	"fmt"
-"strings"
+	"strings"
 
-"nexus/internal/config"
-"nexus/internal/database"
+	"nexus/internal/database"
 	"nexus/internal/model"
 	"nexus/internal/pkg/crypto"
+	"nexus/internal/ws"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
+
+// notifyAllAgentsReload sends a reload command to all connected agents
+// so they pick up user changes immediately.
+func notifyAllAgentsReload() {
+	WSHub.SendCommand("*", &ws.Command{Type: "reload"})
+}
 
 func parsePagination(c *gin.Context) (int, int) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
@@ -44,7 +50,27 @@ func AdminListUsers(c *gin.Context) {
 	offset := (page - 1) * pageSize
 	query.Order("id DESC").Offset(offset).Limit(pageSize).Find(&users)
 
-	SuccessPage(c, users, total, page, pageSize)
+	// 填充在线状态和最后活跃时间
+	type userWithOnline struct {
+		model.User
+		Online   bool       `json:"online"`
+		LastSeen *time.Time `json:"last_seen"`
+	}
+	result := make([]userWithOnline, len(users))
+	for i, u := range users {
+		online := false
+		var lastSeen *time.Time
+		var alive model.AliveIP
+		if err := database.DB.Where("user_id = ?", u.ID).Order("updated_at DESC").First(&alive).Error; err == nil {
+			lastSeen = &alive.UpdatedAt
+			if time.Since(alive.UpdatedAt) < 3*time.Minute {
+				online = true
+			}
+		}
+		result[i] = userWithOnline{User: u, Online: online, LastSeen: lastSeen}
+	}
+
+	SuccessPage(c, result, total, page, pageSize)
 }
 
 func AdminGetUser(c *gin.Context) {
@@ -86,47 +112,48 @@ func AdminGetUser(c *gin.Context) {
 	var ipCount int64
 	database.DB.Model(&model.AliveIP{}).Where("user_id = ?", user.ID).Count(&ipCount)
 
+	// 在线状态和最后活跃时间
+	online := false
+	var lastSeen *time.Time
+	var alive model.AliveIP
+	if err := database.DB.Where("user_id = ?", user.ID).Order("updated_at DESC").First(&alive).Error; err == nil {
+		lastSeen = &alive.UpdatedAt
+		if time.Since(alive.UpdatedAt) < 3*time.Minute {
+			online = true
+		}
+	}
+
 	subSeg := getSubPath()
 	baseURL := database.GetSetting("sub_url")
-	if baseURL == "" {
-		baseURL = fmt.Sprintf("http://%s:%d", config.Global.Server.Host, config.Global.Server.Port)
-	}
 
 	token := user.Token
-	subURLs := strings.Split(baseURL, ",")
-	var links []string
-	for _, url := range subURLs {
-		url = strings.TrimSpace(url)
-		if url == "" {
-			continue
-		}
-		links = append(links,
-			url+"/api/"+subSeg+"/singbox?token="+token,
-			url+"/api/"+subSeg+"/clash?token="+token,
-			url+"/api/"+subSeg+"/surge?token="+token,
-			url+"/api/"+subSeg+"/surfboard?token="+token,
-			url+"/api/"+subSeg+"/shadowrocket?token="+token,
-			url+"/api/"+subSeg+"/v2rayn?token="+token,
-		)
+	if baseURL == "" {
+		Success(c, gin.H{
+			"user":       user,
+			"plan_name":  planName,
+			"group_name": groupName,
+			"ip_count":   ipCount,
+			"online":     online,
+			"last_seen":  lastSeen,
+			"sub_url":    "",
+			"links":      []string{},
+		})
+		return
 	}
 
-	var cleanLinks []string
-	for _, url := range subURLs {
-		url = strings.TrimSpace(url)
-		if url == "" {
-			continue
-		}
-		cleanLinks = append(cleanLinks, url+"/"+subSeg+"/"+token)
-	}
+	// 只取第一个订阅 URL（格式自动检测）
+	firstURL := strings.TrimSpace(strings.Split(baseURL, ",")[0])
+	subURL := firstURL + "/" + subSeg + "/" + token
 
 	Success(c, gin.H{
-		"user":        user,
-		"plan_name":   planName,
-		"group_name":  groupName,
-		"ip_count":    ipCount,
-		"links":       links,
-		"clean_links": cleanLinks,
-		"sub_path":    subSeg,
+		"user":       user,
+		"plan_name":  planName,
+		"group_name": groupName,
+		"ip_count":   ipCount,
+		"online":     online,
+		"last_seen":  lastSeen,
+		"sub_url":    subURL,
+		"links":      []string{subURL},
 	})
 }
 
@@ -217,6 +244,8 @@ func AdminCreateUser(c *gin.Context) {
 		return
 	}
 
+	notifyAllAgentsReload()
+	recordAudit(c, "create_user", fmt.Sprintf("user:%d", user.ID), detailJSON(gin.H{"email": user.Email}))
 	Success(c, user)
 }
 
@@ -224,8 +253,11 @@ type updateUserRequest struct {
 	Email          string `json:"email"`
 	Password       string `json:"password"`
 	PlanID         *uint  `json:"plan_id"`
+	GroupID        *uint  `json:"group_id"`
 	TrafficLimit   *int64 `json:"traffic_limit"`
 	TrafficUsed    *int64 `json:"traffic_used"`
+	UploadUsed     *int64 `json:"upload_used"`
+	DownloadUsed   *int64 `json:"download_used"`
 	ExpiredAt      string `json:"expired_at"`
 	IsAdmin        *bool  `json:"is_admin"`
 	Status         *int   `json:"status"`
@@ -276,13 +308,30 @@ func AdminUpdateUser(c *gin.Context) {
 	}
 
 	if req.PlanID != nil {
-		updates["plan_id"] = *req.PlanID
+		if *req.PlanID == 0 {
+			updates["plan_id"] = nil
+		} else {
+			updates["plan_id"] = *req.PlanID
+		}
+	}
+	if req.GroupID != nil {
+		if *req.GroupID == 0 {
+			updates["group_id"] = nil
+		} else {
+			updates["group_id"] = *req.GroupID
+		}
 	}
 	if req.TrafficLimit != nil {
 		updates["traffic_limit"] = *req.TrafficLimit
 	}
 	if req.TrafficUsed != nil {
 		updates["traffic_used"] = *req.TrafficUsed
+	}
+	if req.UploadUsed != nil {
+		updates["upload_used"] = *req.UploadUsed
+	}
+	if req.DownloadUsed != nil {
+		updates["download_used"] = *req.DownloadUsed
 	}
 	if req.Balance != nil {
 		updates["balance"] = *req.Balance
@@ -328,7 +377,17 @@ func AdminUpdateUser(c *gin.Context) {
 	}
 
 	database.DB.First(&user, id)
+	notifyAllAgentsReload()
+	recordAudit(c, "update_user", fmt.Sprintf("user:%d", user.ID), detailJSON(gin.H{"updated_fields": keys(updates)}))
 	Success(c, user)
+}
+
+func keys(m map[string]interface{}) []string {
+	k := make([]string, 0, len(m))
+	for key := range m {
+		k = append(k, key)
+	}
+	return k
 }
 
 func AdminDeleteUser(c *gin.Context) {
@@ -351,5 +410,53 @@ func AdminDeleteUser(c *gin.Context) {
 		return
 	}
 
+	notifyAllAgentsReload()
+	recordAudit(c, "delete_user", fmt.Sprintf("user:%d", user.ID), detailJSON(gin.H{"email": user.Email}))
 	Success(c, gin.H{"message": "\u7528\u6237\u5df2\u5220\u9664"})
+}
+
+func AdminResetUserUUID(c *gin.Context) {
+	id := c.Param("id")
+
+	var user model.User
+	if err := database.DB.First(&user, id).Error; err != nil {
+		NotFound(c, "\u7528\u6237\u4e0d\u5b58\u5728")
+		return
+	}
+
+	newUUID := uuid.New().String()
+	newToken := uuid.New().String()
+
+	database.DB.Model(&user).Updates(map[string]interface{}{
+		"uuid":  newUUID,
+		"token": newToken,
+	})
+
+	notifyAllAgentsReload()
+	recordAudit(c, "reset_uuid", fmt.Sprintf("user:%d", user.ID), fmt.Sprintf("email: %s", user.Email))
+	Success(c, gin.H{
+		"uuid":  newUUID,
+		"token": newToken,
+	})
+}
+
+func AdminResetUserTraffic(c *gin.Context) {
+	id := c.Param("id")
+
+	var user model.User
+	if err := database.DB.First(&user, id).Error; err != nil {
+		NotFound(c, "\u7528\u6237\u4e0d\u5b58\u5728")
+		return
+	}
+
+	now := time.Now()
+	database.DB.Model(&user).Updates(map[string]interface{}{
+		"traffic_used":     0,
+		"upload_used":      0,
+		"download_used":    0,
+		"traffic_reset_at": &now,
+	})
+	notifyAllAgentsReload()
+	recordAudit(c, "reset_user_traffic", fmt.Sprintf("user:%d", user.ID), fmt.Sprintf("email: %s", user.Email))
+	Success(c, gin.H{"message": "流量已重置"})
 }

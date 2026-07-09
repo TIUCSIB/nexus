@@ -32,9 +32,11 @@ func AdminListRoutes(c *gin.Context) {
 
 type createRouteRequest struct {
 	Name        string `json:"name" binding:"required"`
-	Match       string `json:"match" binding:"required"`
+	Match       string `json:"match"`
 	Action      string `json:"action" binding:"required"`
 	ActionValue string `json:"action_value"`
+	MatchJSON   string `json:"match_json"`
+	ActionJSON  string `json:"action_json"`
 	Sort        int    `json:"sort"`
 	Status      *int   `json:"status"`
 }
@@ -58,6 +60,8 @@ func AdminCreateRoute(c *gin.Context) {
 		Match:       req.Match,
 		Action:      req.Action,
 		ActionValue: req.ActionValue,
+		MatchJSON:   req.MatchJSON,
+		ActionJSON:  req.ActionJSON,
 		Sort:        req.Sort,
 		Status:      status,
 	}
@@ -75,6 +79,8 @@ type updateRouteRequest struct {
 	Match       *string `json:"match"`
 	Action      *string `json:"action"`
 	ActionValue *string `json:"action_value"`
+	MatchJSON   *string `json:"match_json"`
+	ActionJSON  *string `json:"action_json"`
 	Sort        *int    `json:"sort"`
 	Status      *int    `json:"status"`
 }
@@ -109,6 +115,12 @@ func AdminUpdateRoute(c *gin.Context) {
 	}
 	if req.ActionValue != nil {
 		updates["action_value"] = *req.ActionValue
+	}
+	if req.MatchJSON != nil {
+		updates["match_json"] = *req.MatchJSON
+	}
+	if req.ActionJSON != nil {
+		updates["action_json"] = *req.ActionJSON
 	}
 	if req.Sort != nil {
 		updates["sort"] = *req.Sort

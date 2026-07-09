@@ -1,8 +1,8 @@
 import request from '@/utils/request'
-import type { ApiResponse } from '@/types'
+import type { ApiResponse, LoginResponseData } from '@/types'
 
 export const login = (data: { email: string; password: string }) =>
-  request.post('/api/auth/login', data) as Promise<ApiResponse>
+  request.post('/api/auth/login', data) as Promise<ApiResponse<LoginResponseData>>
 
 export const refreshToken = (data: { refresh_token: string }) =>
-  request.post('/api/auth/refresh', data) as Promise<ApiResponse>
+  request.post('/api/auth/refresh', data) as Promise<ApiResponse<LoginResponseData>>

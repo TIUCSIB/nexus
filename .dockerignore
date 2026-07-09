@@ -1,0 +1,37 @@
+# Binaries
+*.exe
+bin/
+nexus-agent
+
+# Dependencies
+node_modules/
+
+# Data
+data/
+*.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Logs
+*.log
+
+# Temp files
+*.tmp
+*.py
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+.gitattributes
+.gitmodules
+
+# Agent (separate build)
+agent/install.sh
+agent/singbox-*.json

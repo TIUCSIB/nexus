@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
+import { useRouter } from 'vue-router'
+import { useSettingsStore } from '@/stores/settings'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -13,21 +15,37 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Separator } from '@/components/ui/separator'
-import { Plus, MoreHorizontal, Pencil, Trash2, RotateCcw, Settings, Copy } from 'lucide-vue-next'
+import { Plus, MoreHorizontal, Pencil, Trash2, RotateCcw, Settings, Copy, GripVertical } from 'lucide-vue-next'
 import { RefreshCw, SlidersHorizontal } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 import { listNodes, createNode, updateNode, deleteNode, restartNode, resetNodeTraffic } from '@/api/node'
+import { batchDeleteNodes, batchResetNodeTraffic, batchUpdateNodes, copyNode, sortNodes, generateECHKey } from '@/api/node'
 import { generateRealityKeys } from '@/api/node'
 import { listGroups } from '@/api/group'
 import { listRoutes } from '@/api/route'
+import { listCustomOutbounds, getNodeOutbounds, updateNodeOutbounds } from '@/api/customOutbound'
+import { listMachines } from '@/api/machine'
 import type { Node } from '@/types'
 import type { NetworkSettings } from '@/types'
 import type { ServerGroup } from '@/api/group'
 import type { RouteRule } from '@/api/route'
+import type { CustomOutbound } from '@/types'
 
 const nodes = ref<Node[]>([])
 const groups = ref<ServerGroup[]>([])
 const routes = ref<RouteRule[]>([])
+const machines = ref<{ id: number; name: string }[]>([])
+const machineModeEnabled = ref(false)
+
+function getMachineName(id: number | null | undefined): string {
+  if (!id) return ''
+  const m = machines.value.find(m => m.id === id)
+  return m ? m.name : ''
+}
+
+watch(machineModeEnabled, (val) => {
+  if (!val) editing.value.machine_id = null
+})
 
 const page = ref(1)
 const dialogOpen = ref(false)
@@ -38,20 +56,117 @@ const editing = ref<Partial<Node>>({})
 const isEdit = ref(false)
 const saving = ref(false)
 
+// Batch selection
+const selectedIds = ref<Set<number>>(new Set())
+const batchDialogOpen = ref(false)
+const batchAction = ref<'delete' | 'reset-traffic'>('delete')
+
+const allSelected = computed(() => {
+  return nodes.value.length > 0 && nodes.value.every(n => selectedIds.value.has(n.id))
+})
+
+const selectedCount = computed(() => selectedIds.value.size)
+
+function toggleAll() {
+  if (allSelected.value) {
+    selectedIds.value = new Set()
+  } else {
+    selectedIds.value = new Set(nodes.value.map(n => n.id))
+  }
+}
+
+function toggleOne(id: number) {
+  const next = new Set(selectedIds.value)
+  if (next.has(id)) {
+    next.delete(id)
+  } else {
+    next.add(id)
+  }
+  selectedIds.value = next
+}
+
+function confirmBatchDelete() {
+  batchAction.value = 'delete'
+  batchDialogOpen.value = true
+}
+
+function confirmBatchResetTraffic() {
+  batchAction.value = 'reset-traffic'
+  batchDialogOpen.value = true
+}
+
+async function handleBatchAction() {
+  const ids = Array.from(selectedIds.value)
+  if (ids.length === 0) return
+
+  try {
+    let res
+    if (batchAction.value === 'delete') {
+      res = await batchDeleteNodes(ids)
+    } else {
+      res = await batchResetNodeTraffic(ids)
+    }
+    if (res.code === 0) {
+      toast.success(batchAction.value === 'delete' ? '批量删除成功' : '批量重置流量成功')
+      batchDialogOpen.value = false
+      selectedIds.value = new Set()
+      fetchData()
+    } else {
+      toast.error(res.message || '操作失败')
+    }
+  } catch { toast.error('操作失败') }
+}
+
+// Drag-and-drop sorting
+const dragIndex = ref<number | null>(null)
+
+function onDragStart(index: number) {
+  dragIndex.value = index
+}
+
+function onDragOver(e: DragEvent, index: number) {
+  e.preventDefault()
+  if (dragIndex.value === null || dragIndex.value === index) return
+  const items = [...nodes.value]
+  const dragged = items[dragIndex.value]
+  items.splice(dragIndex.value, 1)
+  items.splice(index, 0, dragged)
+  dragIndex.value = index
+  nodes.value = items
+}
+
+async function onDragEnd() {
+  dragIndex.value = null
+  // Save new sort order
+  const sorted = nodes.value.map((n, i) => ({ id: n.id, order: i }))
+  try {
+    const res = await sortNodes(sorted)
+    if (res.code !== 0) {
+      toast.error(res.message || '保存排序失败')
+      fetchData()
+    }
+  } catch {
+    toast.error('保存排序失败')
+    fetchData()
+  }
+}
+
 /* ── 高级设置弹窗 ── */
 const advancedOpen = ref(false)
 const advancedTab = ref('tls')
-const advancedTls = ref({
+const certConfigData = ref({
   cert_mode: 'none',
   domain: '',
   email: '',
-  http_port: '80',
   dns_provider: '',
   dns_env: '',
+  http_port: 80,
+  cert_file: '',
+  key_file: '',
   cert_content: '',
   key_content: '',
+  cert_dir: '',
 })
-const advancedOutbounds = ref('')
 const advancedRoutes = ref('')
 const multiplex = ref({
   enabled: false,
@@ -65,40 +180,32 @@ const multiplex = ref({
 })
 
 function openAdvanced() {
+  // Load cert_config from the node's separate cert_config field
   try {
-    const raw = editing.value.network_settings || '{}'
-    const parsed = JSON.parse(raw)
-    advancedTls.value = {
-      cert_mode: parsed.tls_cert_mode || 'none',
-      domain: parsed.tls_domain || '',
-      email: parsed.tls_email || '',
-      http_port: parsed.tls_http_port || '80',
-      dns_provider: parsed.tls_dns_provider || '',
-      dns_env: parsed.tls_dns_env || '',
-      cert_content: parsed.tls_cert_content || '',
-      key_content: parsed.tls_key_content || '',
-    }
-    advancedOutbounds.value = parsed.custom_outbounds
-      ? (typeof parsed.custom_outbounds === 'string' ? parsed.custom_outbounds : JSON.stringify(parsed.custom_outbounds, null, 2))
-      : ''
-    advancedRoutes.value = parsed.custom_routes
-      ? (typeof parsed.custom_routes === 'string' ? parsed.custom_routes : JSON.stringify(parsed.custom_routes, null, 2))
-      : ''
-    multiplex.value = {
-      enabled: parsed.multiplex_enabled || false,
-      protocol: parsed.multiplex_protocol || 'smux',
-      padding: parsed.multiplex_padding || false,
-      max_connections: parsed.multiplex_max_connections || 16,
-      min_streams: parsed.multiplex_min_streams || 4,
-      brutal_enabled: parsed.multiplex_brutal_enabled || false,
-      brutal_up_mbps: parsed.multiplex_brutal_up_mbps || 100,
-      brutal_down_mbps: parsed.multiplex_brutal_down_mbps || 500,
+    if (editing.value.cert_config) {
+      const parsed = JSON.parse(editing.value.cert_config)
+      certConfigData.value = {
+        cert_mode: parsed.cert_mode || 'none',
+        domain: parsed.domain || '',
+        email: parsed.email || '',
+        dns_provider: parsed.dns_provider || '',
+        dns_env: typeof parsed.dns_env === 'object' ? Object.entries(parsed.dns_env).map(([k, v]) => `${k}=${v}`).join('\n') : '',
+        http_port: parsed.http_port || 80,
+        cert_file: parsed.cert_file || '',
+        key_file: parsed.key_file || '',
+        cert_content: parsed.cert_content || '',
+        key_content: parsed.key_content || '',
+        cert_dir: parsed.cert_dir || '',
+      }
+    } else {
+      certConfigData.value = { cert_mode: 'none', domain: '', email: '', dns_provider: '', dns_env: '', http_port: 80, cert_file: '', key_file: '', cert_content: '', key_content: '', cert_dir: '' }
     }
   } catch {
-    advancedTls.value = { cert_mode: 'none', domain: '', email: '', http_port: '80', dns_provider: '', dns_env: '', cert_content: '', key_content: '' }
-    advancedOutbounds.value = ''
-    advancedRoutes.value = ''
-    multiplex.value = { enabled: false, protocol: 'smux', padding: false, max_connections: 16, min_streams: 4, brutal_enabled: false, brutal_up_mbps: 100, brutal_down_mbps: 500 }
+    certConfigData.value = { cert_mode: 'none', domain: '', email: '', dns_provider: '', dns_env: '', http_port: 80, cert_file: '', key_file: '', cert_content: '', key_content: '', cert_dir: '' }
+  }
+  advancedRoutes.value = ''
+  multiplex.value = {
+    enabled: false, protocol: 'smux', padding: false, max_connections: 16, min_streams: 4, brutal_enabled: false, brutal_up_mbps: 100, brutal_down_mbps: 500,
   }
   advancedTab.value = 'tls'
   advancedOpen.value = true
@@ -106,25 +213,40 @@ function openAdvanced() {
 
 function saveAdvanced() {
   try {
+    // Save cert_config as a proper JSON matching CertConfig model
+    const certConfig: Record<string, any> = {}
+    certConfig.cert_mode = certConfigData.value.cert_mode
+    if (certConfigData.value.cert_mode !== 'none') {
+      certConfig.domain = certConfigData.value.domain
+    }
+    if (certConfigData.value.cert_mode === 'http' || certConfigData.value.cert_mode === 'dns') {
+      certConfig.email = certConfigData.value.email
+    }
+    if (certConfigData.value.cert_mode === 'http') {
+      certConfig.http_port = Number(certConfigData.value.http_port) || 80
+    }
+    if (certConfigData.value.cert_mode === 'dns') {
+      certConfig.dns_provider = certConfigData.value.dns_provider
+      // Parse KEY=VALUE lines into a map
+      const envMap: Record<string, string> = {}
+      certConfigData.value.dns_env.split('\n').filter(Boolean).forEach(line => {
+        const idx = line.indexOf('=')
+        if (idx > 0) envMap[line.slice(0, idx).trim()] = line.slice(idx + 1).trim()
+      })
+      certConfig.dns_env = envMap
+    }
+    if (certConfigData.value.cert_mode === 'content') {
+      certConfig.cert_content = certConfigData.value.cert_content
+      certConfig.key_content = certConfigData.value.key_content
+    }
+    if (certConfigData.value.cert_mode === 'file') {
+      certConfig.cert_file = certConfigData.value.cert_file
+      certConfig.key_file = certConfigData.value.key_file
+    }
+    editing.value.cert_config = JSON.stringify(certConfig)
+
+    // Save multiplex settings to network_settings
     const settings = JSON.parse(editing.value.network_settings || '{}')
-    settings.tls_cert_mode = advancedTls.value.cert_mode
-    if (advancedTls.value.cert_mode !== 'none') {
-      settings.tls_domain = advancedTls.value.domain
-    }
-    if (advancedTls.value.cert_mode === 'http-01' || advancedTls.value.cert_mode === 'dns-01') {
-      settings.tls_email = advancedTls.value.email
-    }
-    if (advancedTls.value.cert_mode === 'http-01' || advancedTls.value.cert_mode === 'dns-01') {
-      settings.tls_http_port = advancedTls.value.http_port
-    }
-    if (advancedTls.value.cert_mode === 'dns-01') {
-      settings.tls_dns_provider = advancedTls.value.dns_provider
-      settings.tls_dns_env = advancedTls.value.dns_env
-    }
-    if (advancedTls.value.cert_mode === 'manual') {
-      settings.tls_cert_content = advancedTls.value.cert_content
-      settings.tls_key_content = advancedTls.value.key_content
-    }
     settings.multiplex_enabled = multiplex.value.enabled
     if (multiplex.value.enabled) {
       settings.multiplex_protocol = multiplex.value.protocol
@@ -136,18 +258,27 @@ function saveAdvanced() {
         settings.multiplex_brutal_up_mbps = multiplex.value.brutal_up_mbps
         settings.multiplex_brutal_down_mbps = multiplex.value.brutal_down_mbps
       }
-    }
-    if (advancedOutbounds.value.trim()) {
-      try { settings.custom_outbounds = JSON.stringify(JSON.parse(advancedOutbounds.value)) } catch { settings.custom_outbounds = advancedOutbounds.value }
     } else {
-      delete settings.custom_outbounds
+      delete settings.multiplex_enabled
+      delete settings.multiplex_protocol
+      delete settings.multiplex_padding
+      delete settings.multiplex_max_connections
+      delete settings.multiplex_min_streams
+      delete settings.multiplex_brutal_enabled
+      delete settings.multiplex_brutal_up_mbps
+      delete settings.multiplex_brutal_down_mbps
     }
-    if (advancedRoutes.value.trim()) {
-      try { settings.custom_routes = JSON.stringify(JSON.parse(advancedRoutes.value)) } catch { settings.custom_routes = advancedRoutes.value }
-    } else {
-      delete settings.custom_routes
-    }
+    // Remove legacy tls_* fields from network_settings (migrated to cert_config)
+    delete settings.tls_cert_mode
+    delete settings.tls_domain
+    delete settings.tls_email
+    delete settings.tls_http_port
+    delete settings.tls_dns_provider
+    delete settings.tls_dns_env
+    delete settings.tls_cert_content
+    delete settings.tls_key_content
     editing.value.network_settings = JSON.stringify(settings)
+
     advancedOpen.value = false
     toast.success('高级设置已保存')
   } catch {
@@ -167,6 +298,26 @@ const vlessTransports = [
 ]
 
 /* ── Reality 密钥对生成 ── */
+const echKeyDialogOpen = ref(false)
+const echKeyData = ref({ key: '', config: '' })
+
+async function handleGenerateECHKey() {
+  try {
+    const res = await generateECHKey()
+    if (res.code === 0) {
+      echKeyData.value = res.data
+      echKeyDialogOpen.value = true
+      toast.success('ECH 密钥对已生成')
+    } else {
+      toast.error(res.message || '生成失败')
+    }
+  } catch { toast.error('生成 ECH 密钥失败') }
+}
+
+function copyText(text: string) {
+  navigator.clipboard.writeText(text)
+  toast.success('已复制到剪贴板')
+}
 
 /* ── 编辑协议弹窗 ── */
 const protocolEditOpen = ref(false)
@@ -287,6 +438,9 @@ function buildNetSettingsString(): string {
 }
 
 /* 根据传输协议自动设置 host 默认值 */
+const router = useRouter()
+const settingsStore = useSettingsStore()
+
 watch(() => editing.value.protocol, (proto) => {
   if (proto === 'vless' && editing.value.address && !netSettings.value.host) {
     netSettings.value.host = editing.value.address
@@ -307,10 +461,20 @@ function parseTags(tags: string | undefined | null) {
 }
 
 function getGroupName(id: number | null | undefined) {
-  if (!id) return ''
-  const g = groups.value.find(g => g.id === id)
-  return g ? g.name : ''
-}
+	  if (!id) return ''
+	  const g = groups.value.find(g => g.id === id)
+	  return g ? g.name : ''
+	}
+
+	function toggleGroup(id: number) {
+	  if (!editing.value.group_ids) editing.value.group_ids = []
+	  const idx = editing.value.group_ids.indexOf(id)
+	  if (idx >= 0) {
+	    editing.value.group_ids.splice(idx, 1)
+	  } else {
+	    editing.value.group_ids.push(id)
+	  }
+	}
 
 function getRouteName(id: number | null | undefined) {
   if (!id) return ''
@@ -332,6 +496,28 @@ function getNodeStatus(n: Node): { color: string; label: string } {
   return { color: 'bg-yellow-500', label: '无人使用' }
 }
 
+/* ── 自定义出站绑定 ── */
+const allOutbounds = ref<CustomOutbound[]>([])
+const nodeBoundOutboundIds = ref<number[]>([])
+
+async function fetchNodeOutbounds(nodeId: number) {
+  try {
+    const res = await getNodeOutbounds(nodeId)
+    if (res.code === 0) {
+      nodeBoundOutboundIds.value = res.data.outbound_ids || []
+    }
+  } catch { /* ignore */ }
+}
+
+function toggleBoundOutbound(id: number) {
+  const idx = nodeBoundOutboundIds.value.indexOf(id)
+  if (idx >= 0) {
+    nodeBoundOutboundIds.value.splice(idx, 1)
+  } else {
+    nodeBoundOutboundIds.value.push(id)
+  }
+}
+
 /* ── 数据加载 ── */
 async function fetchData() {
   try {
@@ -342,11 +528,18 @@ async function fetchData() {
 
 async function fetchOptions() {
   try {
-    const [groupRes, routeRes] = await Promise.all([
-      listGroups(), listRoutes({ page: 1, page_size: 100 })
+    const [groupRes, routeRes, outboundRes, machineRes] = await Promise.all([
+      listGroups(), listRoutes({ page: 1, page_size: 100 }),
+      listCustomOutbounds({ page: 1, page_size: 100 }),
+      listMachines(),
     ])
     if (groupRes.code === 0) groups.value = groupRes.data || []
     if (routeRes.code === 0) routes.value = routeRes.data.items || []
+    if (outboundRes.code === 0) {
+      const d = outboundRes.data as any
+      allOutbounds.value = d.items || d || []
+    }
+    if (machineRes.code === 0) machines.value = (machineRes.data || []).map((m: any) => ({ id: m.id, name: m.name }))
   } catch {}
 }
 
@@ -355,12 +548,15 @@ function openCreate() {
   editing.value = {
     custom_id: '', name: '', address: '', protocol: 'vless', port: 443,
     service_port: 0, rate: 1, dynamic_rate: false, tags: '',
-    traffic_limit: 0, group_id: null, route_id: null, parent_id: null,
+    traffic_limit: 0, group_id: null, group_ids: [], route_id: null, parent_id: null, machine_id: null,
     security: 'none', transport: 'tcp', flow_control: 'none',
     config_mode: 'auto', config_json: '', network_settings: '', status: 1,
+    kernel_type: 'singbox', cert_config: '',
   }
   netSettings.value = { host: '', reality_port: 443 }
+  nodeBoundOutboundIds.value = []
   isEdit.value = false
+  machineModeEnabled.value = false
   dialogOpen.value = true
 }
 
@@ -369,7 +565,9 @@ function openEdit(n: Node) {
   netSettings.value = parseNetSettings(n.network_settings)
   syncAlpnFromSettings()
   isEdit.value = true
+  machineModeEnabled.value = !!n.machine_id
   dialogOpen.value = true
+  if (n.id) fetchNodeOutbounds(n.id)
 }
 
 function openCopy(n: Node) {
@@ -392,11 +590,23 @@ async function handleSave() {
     editing.value.network_settings = buildNetSettingsString()
     if (isEdit.value) {
       const res = await updateNode(editing.value.id!, editing.value)
-      if (res.code === 0) { toast.success('节点已更新'); dialogOpen.value = false; fetchData() }
+      if (res.code === 0) {
+        // Save outbound bindings
+        if (editing.value.id) {
+          await updateNodeOutbounds(editing.value.id, nodeBoundOutboundIds.value)
+        }
+        toast.success('节点已更新'); dialogOpen.value = false; fetchData()
+      }
       else { toast.error(res.message || '更新失败') }
     } else {
       const res = await createNode(editing.value)
-      if (res.code === 0) { toast.success('节点已创建'); dialogOpen.value = false; fetchData() }
+      if (res.code === 0) {
+        // Save outbound bindings for new node
+        if (res.data?.id) {
+          await updateNodeOutbounds(res.data.id, nodeBoundOutboundIds.value)
+        }
+        toast.success('节点已创建'); dialogOpen.value = false; fetchData()
+      }
       else { toast.error(res.message || '创建失败') }
     }
   } catch (e: any) { toast.error(e?.response?.data?.message || '操作失败') }
@@ -444,27 +654,64 @@ onMounted(() => { fetchData(); fetchOptions() })
       <Button @click="openCreate"><Plus class="mr-2 h-4 w-4" />创建节点</Button>
     </div>
 
-    <!-- 节点表格 (Xboard 风格) -->
+    <!-- 批量操作栏 -->
+	    <div v-if="selectedCount > 0" class="flex items-center gap-3 px-4 py-2 bg-muted/50 rounded-lg border">
+	      <span class="text-sm font-medium">已选 {{ selectedCount }} 项</span>
+	      <Button variant="outline" size="sm" @click="selectedIds = new Set()">取消选择</Button>
+	      <div class="ml-auto flex gap-2">
+	        <Button variant="outline" size="sm" @click="confirmBatchResetTraffic">
+	          <RotateCcw class="h-3.5 w-3.5 mr-1" />批量重置流量
+	        </Button>
+	        <Button variant="destructive" size="sm" @click="confirmBatchDelete">
+	          <Trash2 class="h-3.5 w-3.5 mr-1" />批量删除
+	        </Button>
+	      </div>
+	    </div>
+
+	    <!-- 节点表格 (Xboard 风格) -->
     <Card>
       <CardContent class="p-0">
         <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead class="w-20">节点ID</TableHead>
-              <TableHead class="w-12">显隐</TableHead>
-              <TableHead>节点</TableHead>
-              <TableHead>地址</TableHead>
-              <TableHead class="w-24 text-center">在线人数</TableHead>
-              <TableHead class="w-20">倍率</TableHead>
-              <TableHead class="w-24">权限组</TableHead>
-              <TableHead class="w-28">流量使用</TableHead>
-              <TableHead class="w-16 text-right">操作</TableHead>
-            </TableRow>
-          </TableHeader>
+<TableHeader>
+	            <TableRow>
+	              <TableHead class="w-8"></TableHead>
+	              <TableHead class="w-10">
+	                <input type="checkbox" :checked="allSelected" @change="toggleAll" class="h-4 w-4" />
+	              </TableHead>
+	              <TableHead class="w-20">自定义ID</TableHead>
+	              <TableHead class="w-12">显隐</TableHead>
+	              <TableHead>节点</TableHead>
+	              <TableHead>地址</TableHead>
+	              <TableHead class="w-24 text-center">在线人数</TableHead>
+	              <TableHead class="w-32">系统状态</TableHead>
+	              <TableHead class="w-20">倍率</TableHead>
+	              <TableHead class="w-28">部署方式</TableHead>
+	              <TableHead class="w-24">权限组</TableHead>
+	              <TableHead class="w-28">流量使用</TableHead>
+	              <TableHead class="w-16 text-right">操作</TableHead>
+	            </TableRow>
+	          </TableHeader>
           <TableBody>
-            <TableRow v-for="n in nodes" :key="n.id">
-              <TableCell>
-                <Badge variant="outline" class="font-mono">{{ n.custom_id || n.id }}</Badge>
+<TableRow
+	              v-for="(n, i) in nodes"
+	              :key="n.id"
+	              :draggable="true"
+	              :class="['hover:bg-muted/50', dragIndex === i ? 'opacity-50 bg-muted' : '']"
+	              @dragstart="onDragStart(i)"
+	              @dragover="(e) => onDragOver(e, i)"
+	              @dragend="onDragEnd"
+	            >
+	              <TableCell class="p-0 cursor-grab active:cursor-grabbing">
+	                <GripVertical class="h-4 w-4 text-muted-foreground mx-auto" />
+	              </TableCell>
+	              <TableCell>
+	                <input type="checkbox" :checked="selectedIds.has(n.id)" @change="toggleOne(n.id)" class="h-4 w-4" />
+	              </TableCell>
+	              <TableCell>
+                <div class="flex items-center gap-1">
+                  <Badge v-if="n.custom_id" variant="default" class="font-mono">{{ n.custom_id }}</Badge>
+                  <Badge v-else variant="outline" class="font-mono text-xs">ID:{{ n.id }}</Badge>
+                </div>
               </TableCell>
               <TableCell>
                 <Switch
@@ -488,11 +735,22 @@ onMounted(() => { fetchData(); fetchOptions() })
                   <span>{{ n.online_count || 0 }}</span>
                 </div>
               </TableCell>
+<TableCell>
+	                <span v-if="n.online" class="text-muted-foreground text-xs">在线</span>
+	                <span v-else class="text-muted-foreground text-xs">-</span>
+              </TableCell>
               <TableCell>
                 <Badge variant="secondary">{{ n.rate || 1 }}x</Badge>
               </TableCell>
               <TableCell>
-                <Badge v-if="n.group_id" variant="outline">{{ getGroupName(n.group_id) }}</Badge>
+                <Badge v-if="!n.machine_id" variant="secondary">独立部署</Badge>
+                <Badge v-else variant="outline" class="font-mono text-xs">{{ getMachineName(n.machine_id) }}</Badge>
+              </TableCell>
+              <TableCell>
+                <template v-if="n.group_id || (n.group_ids && n.group_ids.length > 0)">
+                  <Badge v-if="n.group_id" variant="outline">{{ getGroupName(n.group_id) }}</Badge>
+                  <Badge v-for="gid in (n.group_ids || [])" :key="gid" variant="outline" class="ml-1">{{ getGroupName(gid) }}</Badge>
+                </template>
                 <span v-else class="text-muted-foreground text-sm">-</span>
               </TableCell>
               <TableCell>
@@ -513,8 +771,8 @@ onMounted(() => { fetchData(); fetchOptions() })
                 </DropdownMenu>
               </TableCell>
             </TableRow>
-            <TableRow v-if="!nodes.length">
-              <TableCell colspan="9" class="text-center py-12 text-muted-foreground">暂无节点数据</TableCell>
+<TableRow v-if="!nodes.length">
+	              <TableCell colspan="12" class="text-center py-12 text-muted-foreground">暂无节点数据</TableCell>
             </TableRow>
           </TableBody>
         </Table>
@@ -531,9 +789,9 @@ onMounted(() => { fetchData(); fetchOptions() })
 
     <!-- 创建/编辑弹窗 -->
     <Dialog v-model:open="dialogOpen">
-      <DialogContent class="max-w-3xl max-h-[90vh] overflow-y-auto">
+      <DialogContent class="max-w-3xl max-h-[90vh] overflow-y-auto scrollbar-none">
         <DialogHeader>
-          <div class="flex items-center justify-between">
+          <div class="flex items-center justify-between pr-8">
             <div>
               <DialogTitle>{{ isEdit ? '编辑节点' : '创建节点' }}</DialogTitle>
               <DialogDescription class="mt-1">配置节点的连接参数和传输协议</DialogDescription>
@@ -592,16 +850,16 @@ onMounted(() => { fetchData(); fetchOptions() })
             <Input v-model="editing.tags" placeholder="输入后回车添加标签，多个用逗号分隔" />
           </div>
 
-          <!-- 权限组 -->
+          <!-- 权限组（多选） -->
           <div class="grid gap-2">
             <Label>权限组</Label>
-            <Select v-model="editing.group_id">
-              <SelectTrigger><SelectValue placeholder="请选择权限组" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem :value="null">不分组</SelectItem>
-                <SelectItem v-for="g in groups" :key="g.id" :value="g.id">{{ g.name }}</SelectItem>
-              </SelectContent>
-            </Select>
+            <div class="flex flex-wrap gap-2 rounded-md border p-3">
+              <div v-for="g in groups" :key="g.id" class="flex items-center gap-2">
+                <input type="checkbox" :checked="editing.group_ids?.includes(g.id)" @change="toggleGroup(g.id)" class="h-4 w-4" />
+                <Label class="text-sm font-normal cursor-pointer">{{ g.name }}</Label>
+              </div>
+              <div v-if="groups.length === 0" class="text-sm text-muted-foreground">暂无权限组，请先创建</div>
+            </div>
           </div>
 
           <!-- 节点地址 -->
@@ -978,6 +1236,60 @@ onMounted(() => { fetchData(); fetchOptions() })
                 </SelectContent>
               </Select>
             </div>
+            <div class="grid gap-2">
+              <Label>部署方式</Label>
+              <div class="flex items-center justify-between rounded-lg border p-3">
+                <div>
+                  <p class="text-sm font-medium">{{ machineModeEnabled ? '绑定服务器' : '独立部署' }}</p>
+                  <p class="text-xs text-muted-foreground">{{ machineModeEnabled ? '由选定的服务器 Agent 统一管理' : '节点由 Agent 独立管理' }}</p>
+                </div>
+                <Switch v-model="machineModeEnabled" />
+              </div>
+              <div v-if="machineModeEnabled" class="grid gap-2 mt-1">
+                <Label>选择服务器</Label>
+                <Select v-model="editing.machine_id">
+                  <SelectTrigger><SelectValue placeholder="选择服务器" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem v-for="m in machines" :key="m.id" :value="m.id">{{ m.name }}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </div>
+
+          <!-- 内核类型 + 自定义出站绑定 -->
+          <Separator />
+          <div class="flex items-center gap-2">
+            <Settings class="h-4 w-4" />
+            <Label class="text-base font-semibold">高级配置</Label>
+          </div>
+
+          <div class="grid grid-cols-2 gap-4">
+            <div class="grid gap-2">
+              <Label>内核类型</Label>
+              <Select v-model="editing.kernel_type">
+                <SelectTrigger><SelectValue placeholder="选择内核" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="singbox">sing-box</SelectItem>
+                  <SelectItem value="xray">Xray (开发中)</SelectItem>
+                </SelectContent>
+              </Select>
+              <p class="text-xs text-muted-foreground">sing-box 已支持，Xray 暂未实现</p>
+            </div>
+          </div>
+
+          <!-- 自定义出站绑定 -->
+          <div class="grid gap-2">
+            <Label>已绑定的自定义出站</Label>
+            <div class="flex flex-wrap gap-2 rounded-md border p-3">
+              <div v-for="ob in allOutbounds" :key="ob.id" class="flex items-center gap-2">
+                <input type="checkbox" :checked="nodeBoundOutboundIds.includes(ob.id)" @change="toggleBoundOutbound(ob.id)" class="h-4 w-4" />
+                <Label class="text-sm font-normal cursor-pointer">{{ ob.name }} <span class="text-muted-foreground">({{ ob.tag }})</span></Label>
+              </div>
+              <div v-if="allOutbounds.length === 0" class="text-sm text-muted-foreground">
+                暂无自定义出站，请先在<a href="#" @click.prevent="router.push(settingsStore.adminRoute('custom-outbounds'))" class="text-primary underline">自定义出站管理</a>中创建
+              </div>
+            </div>
           </div>
 
         </div>
@@ -1000,78 +1312,104 @@ onMounted(() => { fetchData(); fetchOptions() })
       <DialogContent class="!w-full !max-w-[800px] !max-h-[85vh] overflow-y-auto overflow-x-hidden">
         <DialogHeader>
           <DialogTitle>高级协议配置</DialogTitle>
-          <DialogDescription>配置 TLS 证书、自定义 Outbounds 和 Routes</DialogDescription>
+          <DialogDescription>TLS 证书、多路复用和自定义路由规则</DialogDescription>
         </DialogHeader>
         <Tabs v-model:value="advancedTab" class="w-full">
           <TabsList class="flex w-full gap-1 shrink-0">
-            <TabsTrigger value="tls">TLS</TabsTrigger>
+            <TabsTrigger value="tls">TLS 证书</TabsTrigger>
             <TabsTrigger v-if="editing.protocol === 'vless'" value="multiplex">多路复用</TabsTrigger>
-            <TabsTrigger value="outbounds">自定义 Outbounds</TabsTrigger>
             <TabsTrigger value="routes">自定义 Routes</TabsTrigger>
           </TabsList>
 
-          <!-- TLS 证书 Tab -->
+          <!-- TLS 证书 Tab (独立 cert_config 字段) -->
           <TabsContent value="tls" class="grid gap-4 py-4">
             <div class="grid gap-2">
               <Label>证书模式</Label>
-              <p class="text-xs text-muted-foreground">选择证书申请方式，仅部分后端节点支持</p>
-              <Select v-model="advancedTls.cert_mode">
+              <p class="text-xs text-muted-foreground">选择证书申请方式，将写入节点独立的 cert_config 字段</p>
+              <Select v-model="certConfigData.cert_mode">
                 <SelectTrigger class="w-full truncate"><SelectValue placeholder="选择证书模式" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">none - 未启用 TLS 证书配置</SelectItem>
-                  <SelectItem value="self">自签名模式 - 证书由节点后端自动生成（10年有效期）</SelectItem>
-                  <SelectItem value="http-01">HTTP-01 模式 - 需要 80 端口可正常访问以完成认证</SelectItem>
-                  <SelectItem value="dns-01">DNS-01 模式 - 通过 DNS 解析记录认证，支持申请泛域名证书</SelectItem>
-                  <SelectItem value="manual">内容推送模式 - 直接将证书内容下发至节点</SelectItem>
+                  <SelectItem value="self">self - 自签名模式（10年有效期，节点后端自动生成）</SelectItem>
+                  <SelectItem value="http">http - ACME HTTP-01 挑战（需 80 端口可访问）</SelectItem>
+                  <SelectItem value="dns">dns - ACME DNS-01 挑战（支持泛域名，需 DNS 提供商 API）</SelectItem>
+                  <SelectItem value="content">content - 面板推送 PEM 内容到节点</SelectItem>
+                  <SelectItem value="file">file - 节点本地证书文件路径</SelectItem>
                 </SelectContent>
               </Select>
             </div>
 
-            <template v-if="advancedTls.cert_mode !== 'none'">
+            <template v-if="certConfigData.cert_mode !== 'none'">
               <div class="grid gap-2">
                 <Label>证书域名</Label>
-                <Input v-model="advancedTls.domain" placeholder="example.com" />
+                <Input v-model="certConfigData.domain" placeholder="example.com" />
               </div>
             </template>
 
-            <template v-if="advancedTls.cert_mode === 'http-01' || advancedTls.cert_mode === 'dns-01'">
+            <template v-if="certConfigData.cert_mode === 'http' || certConfigData.cert_mode === 'dns'">
               <div class="grid gap-2">
-                <Label>通知邮箱</Label>
-                <Input v-model="advancedTls.email" placeholder="admin@example.com" />
+                <Label>通知邮箱（ACME）</Label>
+                <Input v-model="certConfigData.email" placeholder="admin@example.com" />
               </div>
             </template>
 
-            <template v-if="advancedTls.cert_mode === 'http-01'">
+            <template v-if="certConfigData.cert_mode === 'http'">
               <div class="grid gap-2">
-                <Label>认证端口</Label>
-                <Input v-model="advancedTls.http_port" type="number" placeholder="80" />
-                <p class="text-xs text-muted-foreground">ACME 认证端口，默认 80</p>
+                <Label>HTTP 认证端口</Label>
+                <Input v-model.number="certConfigData.http_port" type="number" placeholder="80" />
+                <p class="text-xs text-muted-foreground">ACME HTTP-01 监听端口，默认 80</p>
               </div>
             </template>
 
-            <template v-if="advancedTls.cert_mode === 'dns-01'">
+            <template v-if="certConfigData.cert_mode === 'dns'">
               <div class="grid gap-2">
                 <Label>DNS 提供商</Label>
-                <Input v-model="advancedTls.dns_provider" placeholder="选择 DNS 提供商" />
-                <p class="text-xs text-muted-foreground">查看 DNS 提供商配置指南</p>
+                <Input v-model="certConfigData.dns_provider" placeholder="cloudflare / alidns / ..." />
               </div>
               <div class="grid gap-2">
                 <Label>环境变量 (API 密钥)</Label>
-                <Textarea v-model="advancedTls.dns_env" rows="3" placeholder="KEY=VALUE" class="font-mono text-sm" />
-                <p class="text-xs text-muted-foreground">每行一个 KEY=VALUE 配置</p>
+                <Textarea v-model="certConfigData.dns_env" rows="3" placeholder="CF_API_TOKEN=xxxxx" class="font-mono text-sm" />
+                <p class="text-xs text-muted-foreground">每行一个 KEY=VALUE</p>
               </div>
             </template>
 
-            <template v-if="advancedTls.cert_mode === 'manual'">
+            <template v-if="certConfigData.cert_mode === 'content'">
               <div class="grid gap-2">
-                <Label>证书内容 (Public Key)</Label>
-                <Textarea v-model="advancedTls.cert_content" rows="4" placeholder="-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----" class="font-mono text-sm" />
+                <Label>证书 PEM 内容</Label>
+                <Textarea v-model="certConfigData.cert_content" rows="4" placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----" class="font-mono text-sm" />
               </div>
               <div class="grid gap-2">
-                <Label>密钥内容 (Private Key)</Label>
-                <Textarea v-model="advancedTls.key_content" rows="4" placeholder="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----" class="font-mono text-sm" />
+                <Label>私钥 PEM 内容</Label>
+                <Textarea v-model="certConfigData.key_content" rows="4" placeholder="-----BEGIN PRIVATE KEY-----&#10;...&#10;-----END PRIVATE KEY-----" class="font-mono text-sm" />
               </div>
             </template>
+
+            <template v-if="certConfigData.cert_mode === 'file'">
+              <div class="grid grid-cols-2 gap-4">
+                <div class="grid gap-2">
+                  <Label>证书文件路径</Label>
+                  <Input v-model="certConfigData.cert_file" placeholder="/etc/nexus/cert.pem" />
+                </div>
+                <div class="grid gap-2">
+                  <Label>私钥文件路径</Label>
+                  <Input v-model="certConfigData.key_file" placeholder="/etc/nexus/key.pem" />
+                </div>
+              </div>
+            </template>
+
+            <!-- ECH 密钥生成 -->
+            <div class="border rounded-lg p-4">
+              <div class="flex items-center justify-between">
+                <div>
+                  <Label class="font-medium">ECH (Encrypted Client Hello)</Label>
+                  <p class="text-xs text-muted-foreground mt-1">生成 ECH 密钥对和配置，用于 TLS 连接的客户端问候加密</p>
+                </div>
+                <Button variant="outline" size="sm" @click="handleGenerateECHKey">
+                  <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-1" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
+                  生成 ECH 密钥
+                </Button>
+              </div>
+            </div>
           </TabsContent>
 
           <!-- 多路复用 Tab (VLESS only) -->
@@ -1132,25 +1470,6 @@ onMounted(() => { fetchData(); fetchOptions() })
                 </div>
               </div>
             </template>
-          </TabsContent>
-
-          <!-- 自定义 Outbounds Tab -->
-          <TabsContent value="outbounds" class="grid gap-4 py-4">
-            <div class="border rounded-lg p-4 bg-muted/30">
-              <div class="flex items-center justify-between mb-2">
-                <div>
-                  <Label class="font-medium">自定义 Outbounds</Label>
-                  <p class="text-xs text-muted-foreground mt-1">配置自定义出站规则，内容会合并到 sing-box 的 outbounds 配置中</p>
-                </div>
-                <Button variant="outline" size="sm" @click="advancedOutbounds = JSON.stringify(JSON.parse(advancedOutbounds || '[]'), null, 2)" :disabled="!advancedOutbounds.trim()">JSON 格式化</Button>
-              </div>
-              <Textarea v-model="advancedOutbounds" rows="8" class="font-mono text-sm bg-background" placeholder='[
-  {
-    "type": "direct",
-    "tag": "direct-out"
-  }
-]' />
-            </div>
           </TabsContent>
 
           <!-- 自定义 Routes Tab -->
@@ -1225,6 +1544,57 @@ onMounted(() => { fetchData(); fetchOptions() })
         <DialogFooter>
           <Button variant="outline" @click="deleteDialogOpen = false">取消</Button>
           <Button variant="destructive" @click="handleDelete">删除</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <!-- 批量操作确认弹窗 -->
+    <Dialog v-model:open="batchDialogOpen">
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{{ batchAction === 'delete' ? '确认批量删除' : '确认批量重置流量' }}</DialogTitle>
+        </DialogHeader>
+        <DialogDescription>
+          确定要对已选的 {{ selectedCount }} 个节点执行{{ batchAction === 'delete' ? '删除' : '流量重置' }}操作吗？此操作不可撤销。
+        </DialogDescription>
+        <DialogFooter>
+          <Button variant="outline" @click="batchDialogOpen = false">取消</Button>
+          <Button :variant="batchAction === 'delete' ? 'destructive' : 'default'" @click="handleBatchAction">
+            {{ batchAction === 'delete' ? '批量删除' : '批量重置' }}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <!-- ECH 密钥显示弹窗 -->
+    <Dialog v-model:open="echKeyDialogOpen">
+      <DialogContent class="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>ECH 密钥对</DialogTitle>
+          <DialogDescription>将以下密钥和配置写入 sing-box 配置文件中</DialogDescription>
+        </DialogHeader>
+        <div class="space-y-4 py-4 max-h-[60vh] overflow-y-auto">
+          <div class="grid gap-2">
+            <Label>ECH 密钥 (ECH KEYS)</Label>
+            <div class="flex items-start gap-2">
+              <code class="flex-1 rounded-md bg-muted p-3 text-xs font-mono break-all whitespace-pre-wrap max-h-40 overflow-y-auto">{{ echKeyData.key }}</code>
+              <Button variant="outline" size="icon" class="shrink-0" @click="copyText(echKeyData.key)">
+                <Copy class="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+          <div class="grid gap-2">
+            <Label>ECH 配置 (ECH CONFIGS)</Label>
+            <div class="flex items-start gap-2">
+              <code class="flex-1 rounded-md bg-muted p-3 text-xs font-mono break-all whitespace-pre-wrap max-h-40 overflow-y-auto">{{ echKeyData.config }}</code>
+              <Button variant="outline" size="icon" class="shrink-0" @click="copyText(echKeyData.config)">
+                <Copy class="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button @click="echKeyDialogOpen = false">关闭</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

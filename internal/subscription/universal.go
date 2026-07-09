@@ -12,13 +12,12 @@ import (
 // GenerateV2RayN 生成 Base64 编码的 URI 列表（兼容 V2RayN、ClashR 等客户端）。
 func GenerateV2RayN(nodes []model.Node, user model.User) ([]byte, error) {
 	var lines []string
-	var firstURI string
 
 	for _, node := range nodes {
 		if node.Status != 1 {
 			continue
 		}
-		params := ParseNodeParams(node.ConfigJSON)
+		params := ParseNodeParams(node.ConfigJSON, node.NetworkSettings)
 		var uri string
 
 		switch strings.ToLower(node.Protocol) {
@@ -30,22 +29,8 @@ func GenerateV2RayN(nodes []model.Node, user model.User) ([]byte, error) {
 			uri = buildTuicURI(node, user, params)
 		}
 		if uri != "" {
-			if firstURI == "" {
-				firstURI = uri
-			}
 			lines = append(lines, uri)
 		}
-	}
-
-	// 杩藉姞淇℃伅鑺傜偣
-	if firstURI != "" {
-		expiryName, trafficName := GetInfoNodeNames(user)
-		// 淇℃伅鑺傜偣1锛氬埌鏈熸椂闂达級
-		info1 := buildInfoURI(firstURI, expiryName)
-		lines = append(lines, info1)
-		// 淇℃伅鑺傜偣2锛氬墿浣欐祦閲忥級
-		info2 := buildInfoURI(firstURI, trafficName)
-		lines = append(lines, info2)
 	}
 
 	content := strings.Join(lines, "\n")
@@ -71,13 +56,12 @@ func GenerateSurge(nodes []model.Node, user model.User) ([]byte, error) {
 	b.WriteString("\n[Proxy]\n")
 
 	proxyNames := make([]string, 0)
-	var firstLine string
 
 	for _, node := range nodes {
 		if node.Status != 1 {
 			continue
 		}
-		params := ParseNodeParams(node.ConfigJSON)
+		params := ParseNodeParams(node.ConfigJSON, node.NetworkSettings)
 		var line string
 
 		switch strings.ToLower(node.Protocol) {
@@ -92,23 +76,9 @@ func GenerateSurge(nodes []model.Node, user model.User) ([]byte, error) {
 		}
 
 		if line != "" {
-			if firstLine == "" {
-				firstLine = line
-			}
 			b.WriteString(line + "\n")
 			proxyNames = append(proxyNames, node.Name)
 		}
-	}
-
-	// 杩藉姞淇℃伅鑺傜偣
-	if firstLine != "" {
-		expiryName, trafficName := GetInfoNodeNames(user)
-		info1 := buildSurgeInfoNode(firstLine, expiryName)
-		b.WriteString(info1 + "\n")
-		proxyNames = append(proxyNames, expiryName)
-		info2 := buildSurgeInfoNode(firstLine, trafficName)
-		b.WriteString(info2 + "\n")
-		proxyNames = append(proxyNames, trafficName)
 	}
 
 	// Proxy Group
@@ -147,7 +117,7 @@ func GenerateSurfboard(nodes []model.Node, user model.User) ([]byte, error) {
 		if node.Status != 1 {
 			continue
 		}
-		params := ParseNodeParams(node.ConfigJSON)
+		params := ParseNodeParams(node.ConfigJSON, node.NetworkSettings)
 		var line string
 
 		switch strings.ToLower(node.Protocol) {
@@ -193,10 +163,21 @@ func buildVlessURI(node model.Node, user model.User, p NodeParams) string {
 		sni = node.Address
 	}
 
+	// 流控
+	flow := node.FlowControl
+	if flow == "" {
+		flow = "none"
+	}
+
+	// 安全性
+	security := node.Security
+	if security == "" {
+		security = "none"
+	}
+
 	q := url.Values{}
-	q.Set("flow", "xtls-rprx-vision")
-	q.Set("security", "tls")
-	q.Set("sni", sni)
+	q.Set("flow", flow)
+	q.Set("security", security)
 	q.Set("type", "tcp")
 	q.Set("fp", "chrome")
 
@@ -206,6 +187,8 @@ func buildVlessURI(node model.Node, user model.User, p NodeParams) string {
 		if p.HandshakeHost != "" {
 			q.Set("sni", p.HandshakeHost)
 		}
+	} else {
+		q.Set("sni", sni)
 	}
 
 	return fmt.Sprintf("vless://%s@%s:%d?%s#%s",

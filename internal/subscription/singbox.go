@@ -21,13 +21,17 @@ type NodeParams struct {
 	CongestionCtrl string `json:"congestion_control"`
 }
 
-// ParseNodeParams 从节点的 ConfigJSON 字段解析连接参数。
-func ParseNodeParams(configJSON string) NodeParams {
+// ParseNodeParams 从节点的 ConfigJSON 和 NetworkSettings 字段解析连接参数。
+func ParseNodeParams(configJSON string, networkSettings string) NodeParams {
 	var p NodeParams
 	if configJSON == "" {
 		return p
 	}
 	_ = json.Unmarshal([]byte(configJSON), &p)
+	// NetworkSettings 中的字段覆盖 ConfigJSON 的默认值
+	if networkSettings != "" {
+		_ = json.Unmarshal([]byte(networkSettings), &p)
+	}
 	return p
 }
 
@@ -41,7 +45,7 @@ func GenerateSingbox(nodes []model.Node, user model.User) ([]byte, error) {
 		if node.Status != 1 {
 			continue
 		}
-		params := ParseNodeParams(node.ConfigJSON)
+		params := ParseNodeParams(node.ConfigJSON, node.NetworkSettings)
 		var ob json.RawMessage
 		var err error
 
@@ -105,15 +109,15 @@ func GenerateSingbox(nodes []model.Node, user model.User) ([]byte, error) {
 	blockBytes, _ := json.Marshal(block)
 	outbounds = append(outbounds, blockBytes)
 
-	// dns outbound
-	dnsOB := map[string]interface{}{
-		"type": "dns",
-		"tag":  "dns-out",
-	}
-	dnsBytes, _ := json.Marshal(dnsOB)
-	outbounds = append(outbounds, dnsBytes)
+// dns outbound
+		dnsOB := map[string]interface{}{
+			"type": "dns",
+			"tag":  "dns-out",
+		}
+		dnsBytes, _ := json.Marshal(dnsOB)
+		outbounds = append(outbounds, dnsBytes)
 
-	// 构建完整配置
+		// 构建完整配置
 	config := map[string]interface{}{
 		"log": map[string]interface{}{
 			"level": "info",
@@ -156,13 +160,17 @@ func GenerateSingbox(nodes []model.Node, user model.User) ([]byte, error) {
 }
 
 func buildSingboxVLESS(node model.Node, user model.User, p NodeParams) (json.RawMessage, error) {
+	flow := node.FlowControl
+	if flow == "" {
+		flow = "none"
+	}
 	ob := map[string]interface{}{
 		"type":        "vless",
 		"tag":         node.Name,
 		"server":      node.Address,
 		"server_port": node.Port,
 		"uuid":        user.UUID,
-		"flow":        "xtls-rprx-vision",
+		"flow":        flow,
 	}
 
 	// TLS 配置

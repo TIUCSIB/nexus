@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Users, Server, Activity, HardDrive } from 'lucide-vue-next'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { Users, Server, Activity, HardDrive, TrendingUp, Wifi, UserCheck, Calendar, ArrowUpDown } from 'lucide-vue-next'
+import { useSettingsStore } from '@/stores/settings'
 import { getOverview, getTraffic } from '@/api/stats'
 import { Bar } from 'vue-chartjs'
 import {
@@ -16,7 +19,13 @@ import {
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend)
 
-const stats = ref({ total_users: 0, total_nodes: 0, online_nodes: 0, total_traffic: 0, total_upload: 0, total_download: 0 })
+const router = useRouter()
+const settingsStore = useSettingsStore()
+const stats = ref<any>({
+  total_users: 0, total_nodes: 0, online_nodes: 0, total_traffic: 0, total_upload: 0, total_download: 0,
+  today_upload: 0, today_download: 0, today_traffic: 0,
+  online_devices: 0, online_users: 0, monthly_traffic: 0, yesterday_ranking: [],
+})
 const loading = ref(true)
 const chartData = ref<any>(null)
 const chartOptions = ref<any>(null)
@@ -82,7 +91,7 @@ onMounted(async () => {
 <template>
   <div class="space-y-6">
     <h1 class="text-2xl font-bold">仪表盘</h1>
-    <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+    <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
       <Card>
         <CardHeader class="flex flex-row items-center justify-between pb-2">
           <CardTitle class="text-sm font-medium">用户总数</CardTitle>
@@ -112,6 +121,44 @@ onMounted(async () => {
       </Card>
       <Card>
         <CardHeader class="flex flex-row items-center justify-between pb-2">
+          <CardTitle class="text-sm font-medium">在线用户</CardTitle>
+          <UserCheck class="h-4 w-4 text-muted-foreground" />
+        </CardHeader>
+        <CardContent>
+          <div class="text-2xl font-bold">{{ stats.online_users }}</div>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader class="flex flex-row items-center justify-between pb-2">
+          <CardTitle class="text-sm font-medium">在线设备</CardTitle>
+          <Wifi class="h-4 w-4 text-muted-foreground" />
+        </CardHeader>
+        <CardContent>
+          <div class="text-2xl font-bold">{{ stats.online_devices }}</div>
+        </CardContent>
+      </Card>
+    </div>
+    <div class="grid gap-4 md:grid-cols-3">
+      <Card>
+        <CardHeader class="flex flex-row items-center justify-between pb-2">
+          <CardTitle class="text-sm font-medium">今日流量</CardTitle>
+          <TrendingUp class="h-4 w-4 text-muted-foreground" />
+        </CardHeader>
+        <CardContent>
+          <div class="text-2xl font-bold">{{ formatBytes(stats.today_traffic) }}</div>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader class="flex flex-row items-center justify-between pb-2">
+          <CardTitle class="text-sm font-medium">月度流量</CardTitle>
+          <Calendar class="h-4 w-4 text-muted-foreground" />
+        </CardHeader>
+        <CardContent>
+          <div class="text-2xl font-bold">{{ formatBytes(stats.monthly_traffic) }}</div>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader class="flex flex-row items-center justify-between pb-2">
           <CardTitle class="text-sm font-medium">总流量</CardTitle>
           <HardDrive class="h-4 w-4 text-muted-foreground" />
         </CardHeader>
@@ -127,6 +174,41 @@ onMounted(async () => {
           <Bar :data="chartData" :options="chartOptions" />
         </div>
         <p v-else class="text-muted-foreground">暂无流量数据</p>
+      </CardContent>
+    </Card>
+
+    <!-- Yesterday Node Ranking -->
+    <Card v-if="stats.yesterday_ranking?.length">
+      <CardHeader>
+        <CardTitle class="flex items-center gap-2">
+          <ArrowUpDown class="h-4 w-4" />昨日节点排行
+        </CardTitle>
+      </CardHeader>
+      <CardContent class="p-0">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead class="w-12">排名</TableHead>
+              <TableHead>节点</TableHead>
+              <TableHead>上传</TableHead>
+              <TableHead>下载</TableHead>
+              <TableHead>合计</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            <TableRow v-for="(n, i) in stats.yesterday_ranking" :key="n.node_id" class="cursor-pointer hover:bg-muted/50" @click="router.push(settingsStore.adminRoute('nodes'))">
+              <TableCell>
+                <span class="inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold" :class="i === 0 ? 'bg-yellow-100 text-yellow-700' : i === 1 ? 'bg-gray-100 text-gray-600' : i === 2 ? 'bg-orange-100 text-orange-700' : 'bg-muted text-muted-foreground'">
+                  {{ i + 1 }}
+                </span>
+              </TableCell>
+              <TableCell class="font-medium">{{ n.name }}</TableCell>
+              <TableCell class="font-mono text-sm">{{ formatBytes(n.upload) }}</TableCell>
+              <TableCell class="font-mono text-sm">{{ formatBytes(n.download) }}</TableCell>
+              <TableCell class="font-mono text-sm font-medium">{{ formatBytes(n.total) }}</TableCell>
+            </TableRow>
+          </TableBody>
+        </Table>
       </CardContent>
     </Card>
   </div>

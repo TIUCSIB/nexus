@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"time"
 
@@ -24,10 +25,12 @@ type statsResponse struct {
 
 // connectionEntry represents a single active connection from sing-box.
 type connectionEntry struct {
-	User         string `json:"user"`
-	Source       string `json:"source"`
-	Destination  string `json:"destination"`
-	Network      string `json:"network"`
+	User        string `json:"user"`
+	InboundUser string `json:"inboundUser"`
+	Source      string `json:"source"`
+	SourceIP    string `json:"sourceIP"`
+	Destination string `json:"destination"`
+	Network     string `json:"network"`
 }
 
 // connectionsResponse is the sing-box connections API response shape.
@@ -35,16 +38,33 @@ type connectionsResponse struct {
 	Connections []connectionEntry `json:"connections"`
 }
 
+func connectionUser(c connectionEntry) string {
+	if c.InboundUser != "" {
+		return c.InboundUser
+	}
+	return c.User
+}
+
+func connectionSourceIP(c connectionEntry) string {
+	if c.SourceIP != "" {
+		return c.SourceIP
+	}
+	if host, _, err := net.SplitHostPort(c.Source); err == nil {
+		return host
+	}
+	return c.Source
+}
+
 // StatsCollector queries the sing-box statistics API and returns per-user traffic data.
 type StatsCollector struct {
 	statsURL   string
 	client     *http.Client
-	nodeID     uint
+	nodeID     string
 	lastTraffic map[string][2]uint64 // user -> [upload, download] cumulative
 }
 
 // New creates a new StatsCollector that queries the given sing-box stats URL.
-func New(statsURL string, nodeID uint) *StatsCollector {
+func New(statsURL string, nodeID string) *StatsCollector {
 	return &StatsCollector{
 		statsURL: statsURL,
 		client: &http.Client{
@@ -117,10 +137,24 @@ func (s *StatsCollector) Collect() ([]httpclient.TrafficEntry, error) {
 	return entries, nil
 }
 
+// CollectXboard returns traffic data in Xboard format: {"user_uuid": [upload, download]}
+func (s *StatsCollector) CollectXboard() (map[string][2]int64, error) {
+	entries, err := s.Collect()
+	if err != nil {
+		return nil, err
+	}
+
+	result := make(map[string][2]int64, len(entries))
+	for _, e := range entries {
+		result[e.UserUUID] = [2]int64{e.Upload, e.Download}
+	}
+	return result, nil
+}
+
 // CollectAliveIPs queries the sing-box connections API and extracts per-user source IPs.
 // Returns a map of user UUID to list of unique source IPs.
 func (s *StatsCollector) CollectAliveIPs() (map[string][]string, error) {
-	url := s.statsURL + "/api/v1/connections"
+	url := s.statsURL + "/connections"
 
 	resp, err := s.client.Get(url)
 	if err != nil {
@@ -142,15 +176,17 @@ func (s *StatsCollector) CollectAliveIPs() (map[string][]string, error) {
 	seen := make(map[string]map[string]bool) // user -> set of IPs
 
 	for _, c := range conns.Connections {
-		if c.User == "" || c.Source == "" {
+		user := connectionUser(c)
+		sourceIP := connectionSourceIP(c)
+		if user == "" || sourceIP == "" {
 			continue
 		}
-		if seen[c.User] == nil {
-			seen[c.User] = make(map[string]bool)
+		if seen[user] == nil {
+			seen[user] = make(map[string]bool)
 		}
-		if !seen[c.User][c.Source] {
-			seen[c.User][c.Source] = true
-			result[c.User] = append(result[c.User], c.Source)
+		if !seen[user][sourceIP] {
+			seen[user][sourceIP] = true
+			result[user] = append(result[user], sourceIP)
 		}
 	}
 

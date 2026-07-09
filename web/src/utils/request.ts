@@ -10,6 +10,18 @@ request.interceptors.request.use((config) => {
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
   }
+
+  // 路径伪装：根据 localStorage 中的配置替换 API 路径前缀
+  if (config.url) {
+    const adminPath = localStorage.getItem('admin_path') || 'admin'
+    const authPath = localStorage.getItem('auth_path') || 'auth'
+    const userPath = localStorage.getItem('user_path') || 'user'
+    config.url = config.url
+      .replace('/api/admin/', `/api/${adminPath}/`)
+      .replace('/api/auth/', `/api/${authPath}/`)
+      .replace('/api/user/', `/api/${userPath}/`)
+  }
+
   return config
 })
 

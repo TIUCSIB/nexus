@@ -1,29 +1,67 @@
 # Nexus Agent Configuration
 #
-# Agent uses node_id + global server_token to authenticate with the panel.
-# No registration step needed.
+# 兼容 Xboard-Node 配置格式，同时支持配置继承。
+
+# 日志级别：debug | info | warn | error（默认 info）
+log:
+  level: "info"
+  # 可选：输出到文件（默认 stdout），超过 10MB 自动轮转，保留最近 3 份
+  # log_file: "logs/agent.log"
+  # log_max_size: 10485760  # 单个日志文件最大字节（默认 10MB）
+
+# 健康检查端口（0 = 关闭，默认关闭）
+# health_port: 9091
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 格式一：Xboard 风格（单节点）
+# ══════════════════════════════════════════════════════════════════════════════
 
 panel:
-  # Panel HTTP address (the Nexus panel's public/internal address)
-  url: "http://localhost:9090"
-  # Global server_token from panel settings (System Settings -> server_token)
-  token: "your-server-token-here"
+  url: "https://panel.example.com"
+  token: "your-api-key"
+  node_id: 1
 
-# Multiple nodes can be managed by a single agent instance.
-# Each node runs its own sing-box process with independent config and stats.
-nodes:
-  - node_id: 1
-    address: "0.0.0.0"
-    singbox:
-      binary_path: "sing-box"
-      config_path: "singbox-1.json"
-      working_dir: "."
-      stats_port: 9091
+# ══════════════════════════════════════════════════════════════════════════════
+# 格式二：Xboard 风格（多实例）
+# ══════════════════════════════════════════════════════════════════════════════
 
-  - node_id: 2
-    address: "0.0.0.0"
-    singbox:
-      binary_path: "sing-box"
-      config_path: "singbox-2.json"
-      working_dir: "."
-      stats_port: 9092
+# instances:
+#   - panel:
+#       url: "https://panel.example.com"
+#       token: "api-key-1"
+#       node_id: 1
+#
+#   - panel:
+#       url: "https://panel.example.com"
+#       token: "api-key-2"
+#       node_id: 2
+#     log:
+#       level: "debug"
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 格式三：Nexus 风格（支持配置继承）
+# ══════════════════════════════════════════════════════════════════════════════
+
+# panel:
+#   url: "http://panel.com"
+#   token: "your-token"
+#
+# singbox:
+#   binary_path: "sing-box"
+#   working_dir: "."
+#
+# nodes:
+#   - node_id: 1
+#   - node_id: 2
+#     singbox:
+#       stats_port: 9092
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 配置继承说明：
+#
+# 1. Xboard 格式：instances[] 中的配置会继承顶层 panel 配置
+# 2. Nexus 格式：nodes[] 中的配置会继承顶层 singbox 配置
+# 3. 节点级配置会覆盖顶层配置
+#
+# ══════════════════════════════════════════════════════════════════════════════

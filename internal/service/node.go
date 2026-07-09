@@ -71,6 +71,68 @@ func GetActiveUsers() ([]nexusmodel.User, error) {
 	return users, nil
 }
 
+// nodeAllowedGroups returns the deduplicated set of user groups a node is
+// allowed to serve, merging the legacy GroupID field with the multi-group
+// GroupIDs slice. An empty result means the node has no group restriction
+// (open node) and serves every active user.
+func nodeAllowedGroups(node *nexusmodel.Node) []uint {
+	seen := make(map[uint]struct{})
+	var allowed []uint
+	if node.GroupID != nil && *node.GroupID > 0 {
+		seen[*node.GroupID] = struct{}{}
+		allowed = append(allowed, *node.GroupID)
+	}
+	for _, gid := range node.GroupIDs {
+		if gid == 0 {
+			continue
+		}
+		if _, ok := seen[gid]; ok {
+			continue
+		}
+		seen[gid] = struct{}{}
+		allowed = append(allowed, gid)
+	}
+	return allowed
+}
+
+// GetActiveUsersForNode returns the users that the given node is currently
+// allowed to serve: status is active, not expired, has not exceeded their
+// traffic quota, and either the node is open (no group restriction) or the
+// user's group matches one of the node's allowed groups. Users without a
+// group are treated as open users and can use any node.
+func GetActiveUsersForNode(node *nexusmodel.Node) ([]nexusmodel.User, error) {
+	var users []nexusmodel.User
+	q := nexusdb.DB.Where("status = ?", 1)
+	q = q.Where("expired_at IS NULL OR expired_at > ?", time.Now())
+	q = q.Where("traffic_limit = 0 OR traffic_used < traffic_limit")
+	if err := q.Find(&users).Error; err != nil {
+		return nil, err
+	}
+
+	allowed := nodeAllowedGroups(node)
+	if len(allowed) == 0 {
+		return users, nil
+	}
+
+	allowedSet := make(map[uint]struct{}, len(allowed))
+	for _, gid := range allowed {
+		allowedSet[gid] = struct{}{}
+	}
+
+	filtered := users[:0]
+	for _, u := range users {
+		if u.GroupID == nil || *u.GroupID == 0 {
+			// Open user: no group restriction.
+			filtered = append(filtered, u)
+			continue
+		}
+		if _, ok := allowedSet[*u.GroupID]; ok {
+			filtered = append(filtered, u)
+		}
+	}
+	return filtered, nil
+}
+
 // HasNodeConfigChanged returns true when the node updated_at timestamp is
 // more recent than the given lastSync time.
 func HasNodeConfigChanged(nodeID uint, lastSync time.Time) (bool, error) {

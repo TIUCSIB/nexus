@@ -80,13 +80,13 @@ func cmdBind(args []string) {
 	fs := flag.NewFlagSet("bind", flag.ExitOnError)
 	panelURL := fs.String("panel", "", "Panel URL (required)")
 	token := fs.String("token", "", "Server token (required)")
-	nodeID := fs.Int("node-id", 0, "Node ID (required)")
+	nodeID := fs.String("node-id", "", "Node ID (required)")
 	address := fs.String("address", "0.0.0.0", "Node listen address")
 	statsPort := fs.Int("stats-port", 9090, "Sing-box stats API port")
 	configPath := fs.String("config", defaultConfigPath, "Config file path")
 	fs.Parse(args)
 
-	if *panelURL == "" || *token == "" || *nodeID == 0 {
+	if *panelURL == "" || *token == "" || *nodeID == "" {
 		fs.Usage()
 		os.Exit(1)
 	}
@@ -114,7 +114,7 @@ func cmdBind(args []string) {
 			cfg.Nodes[i].Address = *address
 			cfg.Nodes[i].Singbox.StatsPort = *statsPort
 			if cfg.Nodes[i].Singbox.ConfigPath == "" {
-				cfg.Nodes[i].Singbox.ConfigPath = fmt.Sprintf("singbox-%d.json", *nodeID)
+				cfg.Nodes[i].Singbox.ConfigPath = fmt.Sprintf("singbox-%s.json", *nodeID)
 			}
 			if cfg.Nodes[i].Singbox.BinaryPath == "" {
 				cfg.Nodes[i].Singbox.BinaryPath = "sing-box"
@@ -123,7 +123,7 @@ func cmdBind(args []string) {
 				cfg.Nodes[i].Singbox.WorkingDir = "."
 			}
 			found = true
-			fmt.Printf("Updated node %d\n", *nodeID)
+			fmt.Printf("Updated node %s\n", *nodeID)
 			break
 		}
 	}
@@ -133,12 +133,12 @@ func cmdBind(args []string) {
 			Address: *address,
 			Singbox: config.SingboxConfig{
 				BinaryPath: "sing-box",
-				ConfigPath: fmt.Sprintf("singbox-%d.json", *nodeID),
+				ConfigPath: fmt.Sprintf("singbox-%s.json", *nodeID),
 				WorkingDir: ".",
 				StatsPort:  *statsPort,
 			},
 		})
-		fmt.Printf("Added node %d\n", *nodeID)
+		fmt.Printf("Added node %s\n", *nodeID)
 	}
 
 	if err := cfg.Save(*configPath); err != nil {
@@ -165,7 +165,7 @@ func cmdList(args []string) {
 	fmt.Fprintln(w, "Node ID\tAddress\tStats Port\tConfig File")
 	fmt.Fprintln(w, "-------\t-------\t----------\t-----------")
 	for _, n := range cfg.Nodes {
-		fmt.Fprintf(w, "%d\t%s\t%d\t%s\n", n.NodeID, n.Address, n.Singbox.StatsPort, n.Singbox.ConfigPath)
+		fmt.Fprintf(w, "%s\t%s\t%d\t%s\n", n.NodeID, n.Address, n.Singbox.StatsPort, n.Singbox.ConfigPath)
 	}
 	w.Flush()
 }

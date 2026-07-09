@@ -13,17 +13,36 @@ import { onMounted } from 'vue'
 const router = useRouter()
 const authStore = useAuthStore()
 const settingsStore = useSettingsStore()
-getSiteInfo().then((res: any) => {
-  if (res.code === 0 && res.data) {
-    if (res.data.app_name) { settingsStore.setAppName(res.data.app_name) }
-    if (res.data.app_description) { settingsStore.setAppDescription(res.data.app_description) }
+const loading = ref(false)
+const error = ref('')
+const siteLoaded = ref(false)
+
+onMounted(async () => {
+  // 已登录用户直接跳转到对应控制台
+  const token = localStorage.getItem('token')
+  if (token) {
+    const isAdmin = localStorage.getItem('is_admin') === 'true'
+    const adminPath = localStorage.getItem('admin_path') || 'admin'
+    router.replace(isAdmin ? '/' + adminPath + '/dashboard' : '/user/dashboard')
+    return
   }
-}).catch(() => { })
+
+  try {
+    const res = await getSiteInfo()
+    if (res.code === 0 && res.data) {
+      if (res.data.app_name) { settingsStore.setAppName(res.data.app_name) }
+      if (res.data.app_description) { settingsStore.setAppDescription(res.data.app_description) }
+      if (res.data.admin_path) { localStorage.setItem('admin_path', res.data.admin_path) }
+      if (res.data.auth_path) { localStorage.setItem('auth_path', res.data.auth_path) }
+      if (res.data.user_path) { localStorage.setItem('user_path', res.data.user_path) }
+      if (res.data.sub_path) { localStorage.setItem('sub_path', res.data.sub_path) }
+    }
+  } catch { /* ignore */ }
+  siteLoaded.value = true
+})
 
 const email = ref('')
 const password = ref('')
-const loading = ref(false)
-const error = ref('')
 
 async function handleLogin() {
   if (!email.value || !password.value) {
@@ -49,9 +68,6 @@ async function handleLogin() {
     loading.value = false
   }
 }
-onMounted(() => {
-  document.title = settingsStore.appName + ' - 登录'
-})
 </script>
 
 <template>

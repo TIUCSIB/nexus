@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"fmt"
+
 	"nexus/internal/database"
 	"nexus/internal/model"
 
@@ -19,9 +21,9 @@ func AdminListGroups(c *gin.Context) {
 
 	var result []groupWithStats
 	for _, g := range groups {
-		var userCount, nodeCount int64
-		database.DB.Model(&model.User{}).Where("group_id = ?", g.ID).Count(&userCount)
-		database.DB.Model(&model.Node{}).Where("group_id = ?", g.ID).Count(&nodeCount)
+var userCount, nodeCount int64
+			database.DB.Model(&model.User{}).Where("group_id = ?", g.ID).Count(&userCount)
+			database.DB.Model(&model.Node{}).Where("group_id = ? OR group_ids LIKE ?", g.ID, fmt.Sprintf("%%%d%%", g.ID)).Count(&nodeCount)
 		result = append(result, groupWithStats{ServerGroup: g, UserCount: userCount, NodeCount: nodeCount})
 	}
 
@@ -78,7 +80,7 @@ func AdminDeleteGroup(c *gin.Context) {
 	}
 
 	var nodeCount, planCount int64
-	database.DB.Model(&model.Node{}).Where("group_id = ?", group.ID).Count(&nodeCount)
+	database.DB.Model(&model.Node{}).Where("group_id = ? OR group_ids LIKE ?", group.ID, fmt.Sprintf("%%%d%%", group.ID)).Count(&nodeCount)
 	database.DB.Model(&model.Plan{}).Where("group_id = ?", group.ID).Count(&planCount)
 
 	if nodeCount > 0 || planCount > 0 {

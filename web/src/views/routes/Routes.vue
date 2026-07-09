@@ -51,7 +51,7 @@ async function fetchData() {
 }
 
 function openCreate() {
-  editing.value = { name: '', match: '', action: 'block', action_value: '' }
+  editing.value = { name: '', match: '', action: 'block', action_value: '', match_json: '', action_json: '' }
   isEdit.value = false
   dialogOpen.value = true
 }
@@ -141,7 +141,7 @@ onMounted(fetchData)
     </Card>
 
     <Dialog v-model:open="dialogOpen">
-      <DialogContent>
+      <DialogContent class="max-h-[90vh] overflow-y-auto scrollbar-none">
         <DialogHeader><DialogTitle>{{ isEdit ? '编辑路由' : '创建路由' }}</DialogTitle></DialogHeader>
         <div class="grid gap-4 py-4">
           <div class="grid gap-2">
@@ -171,6 +171,16 @@ onMounted(fetchData)
           <div class="grid gap-2" v-if="editing.action === 'forward'">
             <Label>转发目标</Label>
             <Input v-model="editing.action_value" placeholder="例如：proxy-group-name" />
+          </div>
+          <div class="grid gap-2">
+            <Label>匹配规则 JSON（可选，覆盖上方文本规则）</Label>
+            <Textarea v-model="editing.match_json" rows="3" placeholder='{"domain_suffix":["example.com"],"domain":["google.com"]}' class="font-mono text-sm" />
+            <p class="text-xs text-muted-foreground">结构化匹配规则，优先级高于文本格式。格式参考 sing-box route rule</p>
+          </div>
+          <div class="grid gap-2">
+            <Label>动作参数 JSON（可选）</Label>
+            <Textarea v-model="editing.action_json" rows="3" placeholder='{"target":"proxy-out","outbound":"proxy"}' class="font-mono text-sm" />
+            <p class="text-xs text-muted-foreground">结构化动作参数，可自定义 outbound 目标等高级字段</p>
           </div>
         </div>
         <DialogFooter>

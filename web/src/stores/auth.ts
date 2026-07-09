@@ -16,6 +16,15 @@ export const useAuthStore = defineStore('auth', () => {
       localStorage.setItem('token', res.data.token)
       localStorage.setItem('email', emailAddr)
       localStorage.setItem('is_admin', String(isAdmin.value))
+
+      // 从登录响应中直接获取路径配置，无需等待 getSiteInfo
+      if (res.data.admin_path) localStorage.setItem('admin_path', res.data.admin_path)
+      if (res.data.auth_path) localStorage.setItem('auth_path', res.data.auth_path)
+      if (res.data.user_path) localStorage.setItem('user_path', res.data.user_path)
+      if (res.data.app_name) { localStorage.setItem('app_name', res.data.app_name); document.title = res.data.app_name }
+      if (res.data.app_description) localStorage.setItem('app_description', res.data.app_description)
+      if (res.data.sub_path) localStorage.setItem('sub_path', res.data.sub_path)
+
       return true
     }
     return false

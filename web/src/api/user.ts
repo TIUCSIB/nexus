@@ -9,6 +9,9 @@ export interface UserDetail {
   plan_name: string
   group_name: string
   ip_count: number
+  online: boolean
+  last_seen: string | null
+  sub_url: string
   links: string[]
 }
 
@@ -29,6 +32,9 @@ export const resetUserUUID = (id: number) =>
 
 export const resetUserTraffic = (id: number) =>
   request.post(`/api/admin/users/${id}/reset-traffic`) as Promise<ApiResponse>
+
+export const batchUserOperation = (data: { ids: number[]; action: string }) =>
+  request.post('/api/admin/users/batch-operation', data) as Promise<ApiResponse>
 
 export const getUserTrafficLogs = (id: number, params?: { page?: number; page_size?: number }) =>
   request.get(`/api/admin/users/${id}/traffic-logs`, { params }) as Promise<ApiResponse<PageResult<TrafficLog>>>

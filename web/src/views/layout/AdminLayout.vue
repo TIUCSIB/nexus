@@ -12,7 +12,7 @@ import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Separator } from '@/components/ui/separator'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
-import { LayoutDashboard, Users, Package, Server, Shield, Route, Settings, LogOut, ChevronRight } from 'lucide-vue-next'
+import { LayoutDashboard, Users, Package, Server, Shield, Route, Settings, LogOut, ChevronRight, Link, Activity, Globe, Monitor, ClipboardList, ScrollText, BarChart3 } from 'lucide-vue-next'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -29,10 +29,16 @@ const menuItems = computed(() => [
 const nodeMenuItems = computed(() => [
   { title: '节点管理', icon: Server, path: settingsStore.adminRoute('nodes') },
   { title: '权限组管理', icon: Shield, path: settingsStore.adminRoute('groups') },
+  { title: '机器管理', icon: Monitor, path: settingsStore.adminRoute('machines') },
   { title: '路由管理', icon: Route, path: settingsStore.adminRoute('routes') },
+  { title: '自定义出站', icon: Link, path: settingsStore.adminRoute('custom-outbounds') },
 ])
 
 const bottomMenuItems = computed(() => [
+  { title: '流量重置', icon: ClipboardList, path: settingsStore.adminRoute('traffic-reset') },
+  { title: '审计日志', icon: ScrollText, path: settingsStore.adminRoute('audit-logs') },
+  { title: '流量日志', icon: Activity, path: settingsStore.adminRoute('traffic-logs') },
+  { title: '在线IP', icon: Globe, path: settingsStore.adminRoute('online-ips') },
   { title: '系统设置', icon: Settings, path: settingsStore.adminRoute('settings') },
 ])
 
@@ -84,6 +90,43 @@ function logout() {
                         <router-link :to="item.path" active-class="bg-accent text-accent-foreground">
                           <component :is="item.icon" class="h-4 w-4" />
                           <span>{{ item.title }}</span>
+                        </router-link>
+                      </SidebarMenuSubButton>
+                    </SidebarMenuSubItem>
+                  </SidebarMenuSub>
+                </CollapsibleContent>
+              </SidebarMenuItem>
+            </Collapsible>
+          </SidebarMenu>
+        </SidebarGroup>
+
+        <!-- 统计排行 -->
+        <SidebarGroup>
+          <SidebarMenu>
+            <Collapsible default-open>
+              <SidebarMenuItem>
+                <CollapsibleTrigger as-child>
+                  <SidebarMenuButton>
+                    <BarChart3 class="h-4 w-4" />
+                    <span v-if="sidebarOpen">统计排行</span>
+                    <ChevronRight v-if="sidebarOpen" class="ml-auto h-4 w-4 transition-transform group-data-[state=open]/collapsible:rotate-90" />
+                  </SidebarMenuButton>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <SidebarMenuSub>
+                    <SidebarMenuSubItem>
+                      <SidebarMenuSubButton as-child>
+                        <router-link :to="settingsStore.adminRoute('node-ranking')" active-class="bg-accent text-accent-foreground">
+                          <Server class="h-4 w-4" />
+                          <span>节点流量排行</span>
+                        </router-link>
+                      </SidebarMenuSubButton>
+                    </SidebarMenuSubItem>
+                    <SidebarMenuSubItem>
+                      <SidebarMenuSubButton as-child>
+                        <router-link :to="settingsStore.adminRoute('user-ranking')" active-class="bg-accent text-accent-foreground">
+                          <Users class="h-4 w-4" />
+                          <span>用户流量排行</span>
                         </router-link>
                       </SidebarMenuSubButton>
                     </SidebarMenuSubItem>

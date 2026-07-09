@@ -22,6 +22,7 @@ type User struct {
 	DeviceLimit    int        `gorm:"default:0" json:"device_limit"`
 	SpeedLimitUp   int        `gorm:"default:0" json:"speed_limit_up"`
 	SpeedLimitDown int        `gorm:"default:0" json:"speed_limit_down"`
+	TokenVersion   int        `gorm:"default:0" json:"-"`
 	CreatedAt      time.Time  `json:"created_at"`
 	Remarks        string     `gorm:"type:text" json:"remarks"`
 	Online         bool       `gorm:"-" json:"online"`

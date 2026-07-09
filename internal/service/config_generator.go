@@ -233,7 +233,11 @@ func buildVLESSInbound(node nexusmodel.Node, users []nexusmodel.User) (vlessInbo
 
 	vUsers := make([]vlessUser, len(users))
 	for i, u := range users {
-		vUsers[i] = vlessUser{Name: u.Email, UUID: u.UUID}
+		name := u.UUID
+		if len(name) > 8 {
+			name = name[:8]
+		}
+		vUsers[i] = vlessUser{Name: name, UUID: u.UUID}
 	}
 
 return vlessInbound{
@@ -280,7 +284,7 @@ func buildHysteria2Inbound(node nexusmodel.Node, users []nexusmodel.User) (hyste
 		if len(pw) > 32 {
 			pw = pw[:32]
 		}
-		hyUsers[i] = hysteria2User{Name: u.Email, Password: pw}
+		hyUsers[i] = hysteria2User{Name: pw[:8], Password: pw}
 	}
 
 in := hysteria2Inbound{
@@ -334,8 +338,12 @@ func buildTUICInbound(node nexusmodel.Node, users []nexusmodel.User) (tuicInboun
 
 	tUsers := make([]tuicUser, len(users))
 	for i, u := range users {
+		name := u.UUID
+		if len(name) > 8 {
+			name = name[:8]
+		}
 		tUsers[i] = tuicUser{
-			Name:     u.Email,
+			Name:     name,
 			UUID:     u.UUID,
 			Password: u.UUID,
 		}
@@ -426,14 +434,21 @@ func baseConfig() singboxConfig {
 }
 
 // buildUsersForProtocol returns a []map[string]any suitable for injecting into
-// a raw sing-box inbound config under the users key.
+// a raw sing-box inbound config under the users key. Each user's Name is set
+// to a short prefix of their UUID to avoid exposing personal information.
 func buildUsersForProtocol(protocol string, users []nexusmodel.User) []map[string]any {
 	result := make([]map[string]any, 0, len(users))
+	shortName := func(uuid string) string {
+		if len(uuid) > 8 {
+			return uuid[:8]
+		}
+		return uuid
+	}
 	switch strings.ToLower(protocol) {
 	case "vless":
 		for _, u := range users {
 			result = append(result, map[string]any{
-				"name": u.Email,
+				"name": shortName(u.UUID),
 				"uuid": u.UUID,
 			})
 		}
@@ -444,14 +459,14 @@ func buildUsersForProtocol(protocol string, users []nexusmodel.User) []map[strin
 				pw = pw[:32]
 			}
 			result = append(result, map[string]any{
-				"name":     u.Email,
+				"name":     shortName(u.UUID),
 				"password": pw,
 			})
 		}
 	case "tuic":
 		for _, u := range users {
 			result = append(result, map[string]any{
-				"name":     u.Email,
+				"name":     shortName(u.UUID),
 				"uuid":     u.UUID,
 				"password": u.UUID,
 			})
@@ -459,7 +474,7 @@ func buildUsersForProtocol(protocol string, users []nexusmodel.User) []map[strin
 	default:
 		for _, u := range users {
 			result = append(result, map[string]any{
-				"name": u.Email,
+				"name": shortName(u.UUID),
 				"uuid": u.UUID,
 			})
 		}

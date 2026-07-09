@@ -32,8 +32,8 @@ function formatTraffic(b: number) {
   return (b / Math.pow(k, i)).toFixed(1) + ' ' + s[i]
 }
 
-function toPlanGB(bytes: number | null | undefined): number | null {
-  if (!bytes || bytes === 0) return null
+function toPlanGB(bytes: number | null | undefined): number | undefined {
+  if (!bytes || bytes === 0) return undefined
   return Math.round((bytes / (1024 * 1024 * 1024)) * 100) / 100
 }
 
@@ -62,14 +62,27 @@ function getGroupName(id: number | null) {
 }
 
 function openCreate() {
-  editing.value = { name: '', description: '', group_id: null, traffic_limit: null, duration_days: 30, price: 0, speed_limit: null, device_limit: null, capacity_limit: null, traffic_reset: 0, status: 1 }
+  editing.value = { name: '', description: '', group_id: undefined, traffic_limit: undefined, duration_days: 30, price: undefined, speed_limit: undefined, device_limit: undefined, capacity_limit: undefined, traffic_reset: 0, status: 1 }
   trafficUnit.value = 'GB'
   isEdit.value = false
   dialogOpen.value = true
 }
 
 function openEdit(p: Plan) {
-  editing.value = { ...p, traffic_limit: toPlanGB(p.traffic_limit) }
+  editing.value = {
+    name: p.name,
+    description: p.description,
+    group_id: p.group_id ?? undefined,
+    traffic_limit: toPlanGB(p.traffic_limit),
+    duration_days: p.duration_days,
+    price: p.price || undefined,
+    speed_limit: p.speed_limit || undefined,
+    device_limit: p.device_limit || undefined,
+    capacity_limit: p.capacity_limit || undefined,
+    traffic_reset: p.traffic_reset,
+    sort: p.sort,
+    status: p.status,
+  }
   trafficUnit.value = 'GB'
   isEdit.value = true
   dialogOpen.value = true
@@ -158,7 +171,7 @@ onMounted(() => { fetchData(); fetchGroups() })
     <Dialog v-model:open="dialogOpen">
       <DialogContent class="max-w-2xl">
         <DialogHeader><DialogTitle>{{ isEdit ? '编辑套餐' : '创建套餐' }}</DialogTitle></DialogHeader>
-        <div class="grid gap-4 py-4 max-h-[60vh] overflow-y-auto">
+        <div class="grid gap-4 py-4 max-h-[60vh] overflow-y-auto scrollbar-none">
           <div class="grid grid-cols-2 gap-4">
             <div class="grid gap-2"><Label>套餐名称</Label><Input v-model="editing.name" /></div>
             <div class="grid gap-2">
@@ -181,7 +194,7 @@ onMounted(() => { fetchData(); fetchGroups() })
               </div>
             </div>
             <div class="grid gap-2"><Label>有效天数</Label><Input v-model.number="editing.duration_days" type="number" /></div>
-            <div class="grid gap-2"><Label>价格(分)</Label><Input v-model.number="editing.price" type="number" /></div>
+            <div class="grid gap-2"><Label>价格(分)</Label><Input v-model.number="editing.price" type="number" placeholder="留空则免费" /></div>
           </div>
           <div class="grid grid-cols-3 gap-4">
             <div class="grid gap-2"><Label>限速</Label>

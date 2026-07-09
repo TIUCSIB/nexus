@@ -3,11 +3,13 @@ package handler
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"nexus/internal/config"
 	"nexus/internal/database"
 	"nexus/internal/model"
 	"nexus/internal/pkg/crypto"
+	"nexus/internal/service"
 
 	"github.com/gin-gonic/gin"
 )
@@ -22,6 +24,97 @@ func GetProfile(c *gin.Context) {
 	}
 
 	Success(c, user)
+}
+
+// GetUserStats 返回当前用户的流量统计
+// GET /api/user/stats
+func GetUserStats(c *gin.Context) {
+	userID := c.GetUint("user_id")
+
+	var user model.User
+	if err := database.DB.First(&user, userID).Error; err != nil {
+		NotFound(c, "用户不存在")
+		return
+	}
+
+	// 今日流量
+	todayStart := time.Now().Truncate(24 * time.Hour)
+	var todayUpload, todayDownload int64
+	database.DB.Model(&model.TrafficLog{}).
+		Select("COALESCE(SUM(upload), 0)").
+		Where("user_id = ? AND recorded_at >= ?", userID, todayStart).
+		Scan(&todayUpload)
+	database.DB.Model(&model.TrafficLog{}).
+		Select("COALESCE(SUM(download), 0)").
+		Where("user_id = ? AND recorded_at >= ?", userID, todayStart).
+		Scan(&todayDownload)
+
+	// 本月流量
+	monthStart := time.Date(time.Now().Year(), time.Now().Month(), 1, 0, 0, 0, 0, time.Now().Location())
+	var monthlyUpload, monthlyDownload int64
+	database.DB.Model(&model.TrafficLog{}).
+		Select("COALESCE(SUM(upload), 0)").
+		Where("user_id = ? AND recorded_at >= ?", userID, monthStart).
+		Scan(&monthlyUpload)
+	database.DB.Model(&model.TrafficLog{}).
+		Select("COALESCE(SUM(download), 0)").
+		Where("user_id = ? AND recorded_at >= ?", userID, monthStart).
+		Scan(&monthlyDownload)
+
+	// 各节点流量分布
+	var nodeTraffic []struct {
+		NodeID   uint   `json:"node_id"`
+		NodeName string `json:"node_name"`
+		Upload   int64  `json:"upload"`
+		Download int64  `json:"download"`
+	}
+	database.DB.Table("traffic_logs t").
+		Select("t.node_id, n.name as node_name, SUM(t.upload) as upload, SUM(t.download) as download").
+		Joins("LEFT JOIN nodes n ON n.id = t.node_id").
+		Where("t.user_id = ?", userID).
+		Group("t.node_id").
+		Scan(&nodeTraffic)
+	if nodeTraffic == nil {
+		nodeTraffic = []struct {
+			NodeID   uint   `json:"node_id"`
+			NodeName string `json:"node_name"`
+			Upload   int64  `json:"upload"`
+			Download int64  `json:"download"`
+		}{}
+	}
+
+	// 最近30日每日流量
+	thirtyDaysAgo := time.Now().AddDate(0, 0, -30)
+	var dailyTraffic []struct {
+		Date     string `json:"date"`
+		Upload   int64  `json:"upload"`
+		Download int64  `json:"download"`
+	}
+	database.DB.Table("traffic_logs").
+		Select("DATE(recorded_at) as date, SUM(upload) as upload, SUM(download) as download").
+		Where("user_id = ? AND recorded_at >= ?", userID, thirtyDaysAgo).
+		Group("DATE(recorded_at)").
+		Order("date ASC").
+		Scan(&dailyTraffic)
+	if dailyTraffic == nil {
+		dailyTraffic = []struct {
+			Date     string `json:"date"`
+			Upload   int64  `json:"upload"`
+			Download int64  `json:"download"`
+		}{}
+	}
+
+	Success(c, gin.H{
+		"total_traffic":    user.TrafficUsed,
+		"total_upload":     user.UploadUsed,
+		"total_download":   user.DownloadUsed,
+		"today_upload":     todayUpload,
+		"today_download":   todayDownload,
+		"monthly_upload":   monthlyUpload,
+		"monthly_download": monthlyDownload,
+		"node_traffic":     nodeTraffic,
+		"daily_traffic":    dailyTraffic,
+	})
 }
 
 type updateProfileRequest struct {
@@ -119,33 +212,43 @@ func GetSubscription(c *gin.Context) {
 
 	baseURL := getSubBaseURL(c)
 	token := user.Token
+	available := true
+	unavailableReason := ""
+	if err := service.CheckUserSubscriptionAvailable(&user); err != nil {
+		available = false
+		unavailableReason = service.SubscriptionUnavailableReason(err)
+	}
 
 	subURLs := strings.Split(baseURL, ",")
 	subSeg := getSubPath()
-	var links []string
-	for _, url := range subURLs {
-		url = strings.TrimSpace(url)
-		if url == "" {
-			continue
+	links := []string{}
+	if available {
+		for _, url := range subURLs {
+			url = strings.TrimSpace(url)
+			if url == "" {
+				continue
+			}
+			links = append(links,
+				url+"/api/"+subSeg+"/singbox?token="+token,
+				url+"/api/"+subSeg+"/clash?token="+token,
+				url+"/api/"+subSeg+"/surge?token="+token,
+				url+"/api/"+subSeg+"/surfboard?token="+token,
+				url+"/api/"+subSeg+"/shadowrocket?token="+token,
+				url+"/api/"+subSeg+"/v2rayn?token="+token,
+			)
 		}
-		links = append(links,
-			url+"/api/"+subSeg+"/singbox?token="+token,
-			url+"/api/"+subSeg+"/clash?token="+token,
-			url+"/api/"+subSeg+"/surge?token="+token,
-			url+"/api/"+subSeg+"/surfboard?token="+token,
-			url+"/api/"+subSeg+"/shadowrocket?token="+token,
-			url+"/api/"+subSeg+"/v2rayn?token="+token,
-		)
 	}
 
-	// 干净格式链接：/{sub_path}/{token}（默认 singbox 格式）
-	var cleanLinks []string
-	for _, url := range subURLs {
-		url = strings.TrimSpace(url)
-		if url == "" {
-			continue
+	// 干净格式链接：/{sub_path}/{token}（根据客户端自动识别格式）
+	cleanLinks := []string{}
+	if available {
+		for _, url := range subURLs {
+			url = strings.TrimSpace(url)
+			if url == "" {
+				continue
+			}
+			cleanLinks = append(cleanLinks, url+"/"+subSeg+"/"+token)
 		}
-		cleanLinks = append(cleanLinks, url+"/"+subSeg+"/"+token)
 	}
 
 	var planName string
@@ -157,14 +260,16 @@ func GetSubscription(c *gin.Context) {
 	}
 
 	Success(c, gin.H{
-		"plan_id":       user.PlanID,
-		"plan_name":     planName,
-		"traffic_used":  user.TrafficUsed,
-		"traffic_limit": user.TrafficLimit,
-		"expired_at":    user.ExpiredAt,
-		"token":         token,
-		"links":         links,
-		"clean_links":   cleanLinks,
-		"sub_path":      subSeg,
+		"plan_id":            user.PlanID,
+		"plan_name":          planName,
+		"traffic_used":       user.TrafficUsed,
+		"traffic_limit":      user.TrafficLimit,
+		"expired_at":         user.ExpiredAt,
+		"token":              token,
+		"links":              links,
+		"clean_links":        cleanLinks,
+		"sub_path":           subSeg,
+		"available":          available,
+		"unavailable_reason": unavailableReason,
 	})
 }

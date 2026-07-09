@@ -14,15 +14,23 @@ import (
 	"nexus/internal/service"
 )
 
+const defaultJWTSecret = "change-me-jwt-secret"
+const defaultSecretKey = "change-me-to-a-random-string-in-production"
+
 func main() {
 	configPath := flag.String("config", "config.yaml", "path to config file")
 	initAdminEmail := flag.String("admin-email", "", "create admin user with this email")
 	initAdminPass := flag.String("admin-pass", "", "admin password (use with -admin-email)")
 	flag.Parse()
 
-	if err := config.Load(*configPath); err != nil {
-		log.Fatalf("load config failed: %v", err)
-	}
+if err := config.Load(*configPath); err != nil {
+			log.Fatalf("load config failed: %v", err)
+		}
+
+		// Security: detect default secret keys
+		if config.Global.JWT.Secret == defaultJWTSecret || config.Global.App.SecretKey == defaultSecretKey {
+			log.Fatal("[安全] 检测到默认密钥！请修改 config.yaml 中的 jwt.secret 和 app.secret_key 为随机字符串，否则面板存在严重安全风险")
+		}
 
 	jwt.Init(config.Global.JWT.Secret)
 

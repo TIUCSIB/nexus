@@ -1,0 +1,40 @@
+﻿# Nexus Panel Configuration
+app:
+  name: "Nexus"
+  debug: true
+  secret_key: "change-me-to-a-random-string-in-production"
+
+server:
+  host: "0.0.0.0"
+  port: 9092
+  admin_port: 8081
+
+database:
+  driver: "sqlite"
+  dsn: "data/nexus.db"
+
+jwt:
+  secret: "change-me-jwt-secret"
+  expire_hours: 72
+
+grpc:
+  listen: "0.0.0.0:9090"
+  cert_file: ""
+  key_file: ""
+
+node:
+  # Heartbeat interval in seconds
+  heartbeat_interval: 30
+  # Node offline timeout in seconds
+  offline_timeout: 90
+
+subscription:
+  # Traffic reset interval in days (0 = never reset)
+  traffic_reset_days: 30
+  # Minimum plan order
+  plan_sort: 0
+
+payment:
+  enabled: false
+  # Supported: stripe, alipay, wxpay, usdt
+  gateways: []

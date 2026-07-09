@@ -7,6 +7,8 @@ export interface RouteRule {
   match: string
   action: string
   action_value: string
+  match_json: string
+  action_json: string
   sort: number
   status: number
   created_at: string

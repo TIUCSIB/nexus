@@ -1,0 +1,65 @@
+{
+  "log": {
+    "level": "info",
+    "timestamp": true
+  },
+  "inbounds": [
+    {
+      "type": "vless",
+      "tag": "vless-reality",
+      "listen": "::",
+      "listen_port": 10001,
+      "users": [
+        {
+          "name": "35720377",
+          "uuid": "35720377-4057-41f3-b522-2c41cf3f168b"
+        },
+        {
+          "name": "994351fc",
+          "uuid": "994351fc-e30c-498c-b5f2-a772771db013"
+        },
+        {
+          "name": "07bccbab",
+          "uuid": "07bccbab-036c-44c0-954e-69d9f8f26a97"
+        }
+      ],
+      "tls": {
+        "enabled": true,
+        "server_name": "",
+        "reality": {
+          "enabled": true,
+          "handshake": {
+            "server": "www.microsoft.com",
+            "server_port": 443
+          },
+          "private_key": "",
+          "short_id": [
+            "6ba85179e30d4fc2"
+          ]
+        }
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "type": "direct",
+      "tag": "direct"
+    },
+    {
+      "type": "block",
+      "tag": "block"
+    }
+  ],
+  "route": {
+    "rules": [
+      {
+        "type": "logical",
+        "outbound": "block",
+        "protocol": [
+          "dns"
+        ]
+      }
+    ],
+    "final": "direct"
+  }
+}

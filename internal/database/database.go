@@ -2,6 +2,7 @@ package database
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,8 +13,8 @@ import (
 	"nexus/internal/model"
 	"nexus/internal/pkg/crypto"
 
-	"github.com/google/uuid"
 	"github.com/glebarez/sqlite"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
@@ -41,23 +42,48 @@ func Init(cfg config.DatabaseConfig) error {
 	DB.Exec("PRAGMA journal_mode=WAL")
 	DB.Exec("PRAGMA busy_timeout=5000")
 
-	if err := DB.AutoMigrate(
-		&model.User{},
-		&model.Plan{},
-		&model.Node{},
-		&model.ServerGroup{},
-		&model.TrafficLog{},
-		&model.SystemConfig{},
-		&model.AliveIP{},
-		&model.RouteRule{},
-	); err != nil {
+if err := DB.AutoMigrate(
+			&model.User{},
+			&model.Plan{},
+			&model.Node{},
+			&model.ServerGroup{},
+			&model.TrafficLog{},
+			&model.SystemConfig{},
+			&model.AliveIP{},
+			&model.RouteRule{},
+			&model.CustomOutbound{},
+			&model.NodeOutbound{},
+			&model.Machine{},
+			&model.MachineLoadHistory{},
+		&model.AuditLog{},
+		&model.TrafficResetLog{},
+		); err != nil {
 		return err
 	}
 
 	// Initialize default server_token if not exists
 	initDefaultServerToken()
 
+	// Fix legacy group_ids data (plain numbers instead of JSON arrays)
+	fixLegacyGroupIDs()
+
 	return nil
+}
+
+func fixLegacyGroupIDs() {
+	// Find records where group_ids is a plain number instead of a JSON array
+	type badNode struct {
+		ID       uint
+		GroupIDs string
+	}
+	var badNodes []badNode
+	DB.Raw("SELECT id, group_ids FROM nodes WHERE group_ids IS NOT NULL AND group_ids != '' AND group_ids NOT LIKE '[%'").Scan(&badNodes)
+	for _, n := range badNodes {
+		var single uint
+		if err := json.Unmarshal([]byte(n.GroupIDs), &single); err == nil {
+			DB.Exec("UPDATE nodes SET group_ids = ? WHERE id = ?", fmt.Sprintf("[%d]", single), n.ID)
+		}
+	}
 }
 
 func initDefaultServerToken() {

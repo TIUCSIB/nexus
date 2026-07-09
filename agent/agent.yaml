@@ -1,12 +1,12 @@
 panel:
-  url: "http://localhost:9091"
-  token: "b7b77076-d2e3-4e15-b956-68e5da42169f"
-
+    url: http://localhost:9090
+    token: DmuiLK9OG70fwRyiL6unH7
 nodes:
-  - node_id: 3
-    address: "0.0.0.0"
-    singbox:
-      binary_path: "sing-box"
-      config_path: "singbox-3.json"
-      working_dir: "."
-      stats_port: 9093
+    - node_id: "2"
+      address: 0.0.0.0
+      singbox:
+        binary_path: sing-box
+        config_path: singbox-3.json
+        working_dir: .
+        stats_url: ""
+        stats_port: 9091

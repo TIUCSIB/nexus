@@ -108,9 +108,13 @@ func AdminUpdatePlan(c *gin.Context) {
 	if req.Description != "" {
 		updates["description"] = req.Description
 	}
-	if req.GroupID != nil {
-		updates["group_id"] = *req.GroupID
-	}
+if req.GroupID != nil {
+			if *req.GroupID == 0 {
+				updates["group_id"] = nil
+			} else {
+				updates["group_id"] = *req.GroupID
+			}
+		}
 	if req.TrafficLimit != nil {
 		updates["traffic_limit"] = *req.TrafficLimit
 	}

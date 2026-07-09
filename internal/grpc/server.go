@@ -161,7 +161,7 @@ func (s *grpcServer) Register(ctx context.Context, req *nodepb.RegisterRequest) 
 	if expireHours == 0 {
 		expireHours = 720 // 30 days default for nodes
 	}
-	authToken, err := nexusjwt.Generate(node.ID, false, expireHours)
+	authToken, err := nexusjwt.Generate(node.ID, false, 0, expireHours)
 	if err != nil {
 		return &nodepb.RegisterResponse{Success: false, Error: "failed to generate auth token"}, nil
 	}

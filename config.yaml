@@ -1,7 +1,7 @@
 ﻿# Nexus Panel Configuration
 app:
   name: "Nexus"
-  debug: true
+  debug: false
   secret_key: "change-me-to-a-random-string-in-production"
 
 server:

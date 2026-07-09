@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -12,6 +13,7 @@ import (
 
 type singboxConnection struct {
 	ID            string `json:"id"`
+	User          string `json:"user"`
 	Upload        int64  `json:"upload"`
 	Download      int64  `json:"download"`
 	Start         string `json:"start"`
@@ -28,6 +30,23 @@ type singboxConnection struct {
 
 type singboxConnectionsResponse struct {
 	Connections []singboxConnection `json:"connections"`
+}
+
+func (c singboxConnection) userUUID() string {
+	if c.InboundUser != "" {
+		return c.InboundUser
+	}
+	return c.User
+}
+
+func (c singboxConnection) sourceIP() string {
+	if c.SourceIP != "" {
+		return c.SourceIP
+	}
+	if host, _, err := net.SplitHostPort(c.Source); err == nil {
+		return host
+	}
+	return c.Source
 }
 
 type Enforcer struct {
@@ -71,15 +90,16 @@ func (e *Enforcer) Enforce() (int, error) {
 
 	userMap := make(map[string]*userConns)
 	for _, conn := range conns {
-		uuid := conn.InboundUser
-		if uuid == "" {
+		uuid := conn.userUUID()
+		sourceIP := conn.sourceIP()
+		if uuid == "" || sourceIP == "" {
 			continue
 		}
 		if userMap[uuid] == nil {
 			userMap[uuid] = &userConns{ips: make(map[string]bool)}
 		}
 		userMap[uuid].conns = append(userMap[uuid].conns, conn)
-		userMap[uuid].ips[conn.SourceIP] = true
+		userMap[uuid].ips[sourceIP] = true
 	}
 
 	var closed int
@@ -110,8 +130,8 @@ func (e *Enforcer) Enforce() (int, error) {
 				log.Printf("[devicelimit] close conn %s for user %s failed: %v", conn.ID[:8], uuid[:8], err)
 				continue
 			}
-			closed++
-			log.Printf("[devicelimit] closed conn %s (user=%s, src=%s)", conn.ID[:8], uuid[:8], conn.SourceIP)
+				closed++
+				log.Printf("[devicelimit] closed conn %s (user=%s, src=%s)", conn.ID[:8], uuid[:8], conn.sourceIP())
 		}
 	}
 	if closed > 0 {
@@ -129,8 +149,12 @@ func (e *Enforcer) selectConnectionsToClose(conns []singboxConnection, excess in
 		if excess <= 0 {
 			break
 		}
-		if !seen[c.SourceIP] {
-			seen[c.SourceIP] = true
+		sourceIP := c.sourceIP()
+		if sourceIP == "" {
+			continue
+		}
+		if !seen[sourceIP] {
+			seen[sourceIP] = true
 			result = append(result, c)
 			excess--
 		}

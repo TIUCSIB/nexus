@@ -15,14 +15,15 @@ import {
   DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
 // pagination uses custom buttons
-import { Plus, Pencil, Trash2, Eye, Search, RotateCcw, CalendarIcon, MoreHorizontal, Copy, RefreshCw, Activity, BarChart3 } from 'lucide-vue-next'
+import { Plus, Pencil, Trash2, Eye, Search, RotateCcw, CalendarIcon, MoreHorizontal, Copy, RefreshCw, Activity, BarChart3, Ban, CheckCircle } from 'lucide-vue-next'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Calendar } from '@/components/ui/calendar'
 import { getLocalTimeZone, today, parseDate, type DateValue } from '@internationalized/date'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { toast } from 'vue-sonner'
 import { useSettingsStore } from '@/stores/settings'
-import { listUsers, createUser, updateUser, deleteUser, resetUserUUID, resetUserTraffic, getUserTrafficLogs } from '@/api/user'
+import { listUsers, createUser, updateUser, deleteUser, resetUserUUID, resetUserTraffic, getUserTrafficLogs, batchUserOperation } from '@/api/user'
 import { listPlans } from '@/api/plan'
 import { listGroups } from '@/api/group'
 import type { User, Plan, PageResult } from '@/types'
@@ -52,6 +53,10 @@ const emailPrefix = ref('')
 const emailDomain = ref('')
 const expiredAt = ref('')
 const datePickerOpen = ref(false)
+const selectedIds = ref<Set<number>>(new Set())
+const batchActionDialog = ref(false)
+const batchAction = ref('')
+const allSelected = ref(false)
 
 function formatDateValue(d: DateValue | undefined): string {
   if (!d) return ''
@@ -61,8 +66,8 @@ function formatDateValue(d: DateValue | undefined): string {
   return `${y}-${m}-${day}`
 }
 
-function toGB(bytes: number | null | undefined): number | null {
-  if (!bytes || bytes === 0) return null
+function toGB(bytes: number | null | undefined): number | undefined {
+  if (!bytes || bytes === 0) return undefined
   return Math.round((bytes / (1024 * 1024 * 1024)) * 100) / 100
 }
 
@@ -98,6 +103,11 @@ function formatExpiry(d: string | null) {
   const m = String(date.getMonth() + 1).padStart(2, '0')
   const day = String(date.getDate()).padStart(2, '0')
   return `${y}-${m}-${day}`
+}
+
+function formatDate(d: string | null | undefined) {
+  if (!d) return '-'
+  return new Date(d).toLocaleString('zh-CN')
 }
 
 function resolveGroupName(u: User): string {
@@ -165,14 +175,28 @@ function openCreate() {
 
 function openEdit(u: User) {
   editingUser.value = {
-    ...u, password: '',
+    id: u.id,
+    email: u.email,
+    uuid: u.uuid,
+    token: u.token,
+    password: '',
+    balance: u.balance,
+    plan_id: u.plan_id ?? undefined,
+    group_id: u.group_id ?? undefined,
     upload_used: toGB(u.upload_used),
     download_used: toGB(u.download_used),
+    traffic_used: u.traffic_used,
     traffic_limit: toGB(u.traffic_limit),
-    speed_limit_up: u.speed_limit_up || u.speed_limit_down || null,
-    speed_limit_down: null,
-    device_limit: u.device_limit || null,
+    traffic_reset_at: u.traffic_reset_at,
+    expired_at: u.expired_at,
+    is_admin: u.is_admin,
+    status: u.status,
+    device_limit: u.device_limit || undefined,
+    speed_limit_up: u.speed_limit_up || undefined,
+    speed_limit_down: undefined,
     remarks: u.remarks || '',
+    created_at: u.created_at,
+    updated_at: u.updated_at,
   }
   if (u.email && u.email.includes('@')) {
     const parts = u.email.split('@')
@@ -203,8 +227,8 @@ async function handleSave() {
     data.email = composedEmail
     if (!data.password) delete data.password
     if (data.password === '') delete data.password
-    data.plan_id = selectedPlanId.value && selectedPlanId.value !== '__none__' ? Number(selectedPlanId.value) : null
-    data.group_id = selectedGroupId.value && selectedGroupId.value !== '__none__' ? Number(selectedGroupId.value) : null
+data.plan_id = selectedPlanId.value && selectedPlanId.value !== '__none__' ? Number(selectedPlanId.value) : 0
+	    data.group_id = selectedGroupId.value && selectedGroupId.value !== '__none__' ? Number(selectedGroupId.value) : 0
     data.expired_at = expiredAt.value || null
     data.is_admin = isAdmin.value
     data.upload_used = toBytes(data.upload_used)
@@ -287,7 +311,43 @@ async function handleDelete() {
   } catch (e: any) { toast.error(e?.response?.data?.message || '删除失败，请重试') }
 }
 
-function goDetail(id: number) { router.push(`/admin/users/${id}`) }
+function goDetail(id: number) { router.push(settingsStore.adminRoute('users/' + id)) }
+
+function toggleSelect(id: number) {
+  const s = new Set(selectedIds.value)
+  if (s.has(id)) s.delete(id); else s.add(id)
+  selectedIds.value = s
+  allSelected.value = s.size === users.value.length
+}
+
+function toggleSelectAll() {
+  if (allSelected.value) {
+    selectedIds.value = new Set()
+    allSelected.value = false
+  } else {
+    selectedIds.value = new Set(users.value.map(u => u.id))
+    allSelected.value = true
+  }
+}
+
+function openBatchDialog(action: string) {
+  if (selectedIds.value.size === 0) { toast.error('请先选择用户'); return }
+  batchAction.value = action
+  batchActionDialog.value = true
+}
+
+async function handleBatchAction() {
+  try {
+    const res = await batchUserOperation({ ids: Array.from(selectedIds.value), action: batchAction.value })
+    if (res.code === 0) {
+      toast.success(res.message || '操作成功')
+      batchActionDialog.value = false
+      selectedIds.value = new Set()
+      allSelected.value = false
+      fetchData()
+    } else { toast.error(res.message || '操作失败') }
+  } catch { toast.error('操作失败') }
+}
 
 const visiblePages = computed(() => {
   const pages: number[] = []
@@ -325,6 +385,9 @@ onMounted(() => { fetchData(); loadOptions() })
         <Table>
           <TableHeader>
             <TableRow>
+              <TableHead class="w-10">
+                <input type="checkbox" :checked="allSelected" @change="toggleSelectAll" class="h-4 w-4" />
+              </TableHead>
               <TableHead class="w-12">ID</TableHead>
               <TableHead>邮箱</TableHead>
               <TableHead>权限组</TableHead>
@@ -338,10 +401,26 @@ onMounted(() => { fetchData(); loadOptions() })
           </TableHeader>
           <TableBody>
             <TableRow v-for="u in users" :key="u.id" class="cursor-pointer hover:bg-muted/50" @click="goDetail(u.id)">
+              <TableCell @click.stop>
+                <input type="checkbox" :checked="selectedIds.has(u.id)" @change="toggleSelect(u.id)" class="h-4 w-4" />
+              </TableCell>
               <TableCell class="font-mono text-xs">{{ u.id }}</TableCell>
               <TableCell class="font-medium max-w-[180px]">
                 <div class="flex items-center gap-2">
-                  <span :class="u.online ? 'bg-green-500' : 'bg-gray-400'" class="w-2 h-2 rounded-full shrink-0" />
+                  <template v-if="u.online !== undefined">
+                    <Tooltip>
+                      <TooltipTrigger>
+                        <span :class="u.online ? 'bg-green-500' : 'bg-gray-400'" class="w-2.5 h-2.5 rounded-full shrink-0 block" />
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        <span v-if="u.online">在线</span>
+                        <span v-else>
+                          最后在线: {{ u.last_seen ? formatDate(u.last_seen) : '未知' }}
+                        </span>
+                      </TooltipContent>
+                    </Tooltip>
+                  </template>
+                  <span v-else :class="u.status === 1 ? 'bg-green-500' : 'bg-gray-400'" class="w-2 h-2 rounded-full shrink-0" />
                   <span class="truncate">{{ u.email }}</span>
                 </div>
               </TableCell>
@@ -392,7 +471,7 @@ onMounted(() => { fetchData(); loadOptions() })
               </TableCell>
             </TableRow>
             <TableRow v-if="!users.length && !loading">
-              <TableCell colspan="11" class="text-center py-12 text-muted-foreground">
+              <TableCell colspan="12" class="text-center py-12 text-muted-foreground">
                 暂无用户数据
               </TableCell>
             </TableRow>
@@ -401,26 +480,49 @@ onMounted(() => { fetchData(); loadOptions() })
 
         <div class="flex items-center justify-between px-4 py-3 border-t">
           <span class="text-sm text-muted-foreground">共 {{ total }} 条，第 {{ page }} / {{ totalPages }} 页</span>
-          <Pagination v-if="totalPages > 1">
-            <PaginationContent>
-              <PaginationItem>
-                <PaginationPrevious @click="page = Math.max(1, page - 1); fetchData()" :disabled="page <= 1" />
-              </PaginationItem>
-              <PaginationItem v-for="p in visiblePages" :key="p">
-                <PaginationLink :isActive="p === page" @click="page = p; fetchData()">{{ p }}</PaginationLink>
-              </PaginationItem>
-              <PaginationItem>
-                <PaginationNext @click="page = Math.min(totalPages, page + 1); fetchData()" :disabled="page >= totalPages" />
-              </PaginationItem>
-            </PaginationContent>
-          </Pagination>
+          <div class="flex gap-1" v-if="totalPages > 1">
+            <Button variant="outline" size="sm" :disabled="page <= 1" @click="page = Math.max(1, page - 1); fetchData()">上一页</Button>
+            <Button v-for="p in visiblePages" :key="p" :variant="p === page ? 'default' : 'outline'" size="sm" @click="page = p; fetchData()">{{ p }}</Button>
+            <Button variant="outline" size="sm" :disabled="page >= totalPages" @click="page = Math.min(totalPages, page + 1); fetchData()">下一页</Button>
+          </div>
         </div>
       </CardContent>
     </Card>
 
+    <!-- Batch Action Bar -->
+    <div v-if="selectedIds.size > 0" class="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 rounded-lg border bg-background px-4 py-3 shadow-lg">
+      <span class="text-sm text-muted-foreground">已选择 <strong>{{ selectedIds.size }}</strong> 个用户</span>
+      <Button size="sm" variant="destructive" @click="openBatchDialog('ban')"><Ban class="mr-1 h-3 w-3" />批量封禁</Button>
+      <Button size="sm" variant="default" @click="openBatchDialog('unban')"><CheckCircle class="mr-1 h-3 w-3" />批量解封</Button>
+      <Button size="sm" variant="outline" @click="openBatchDialog('reset_traffic')"><BarChart3 class="mr-1 h-3 w-3" />重置流量</Button>
+      <Button size="sm" variant="outline" @click="openBatchDialog('reset_uuid')"><RefreshCw class="mr-1 h-3 w-3" />重置UUID</Button>
+      <Button size="sm" variant="destructive" @click="openBatchDialog('delete')"><Trash2 class="mr-1 h-3 w-3" />批量删除</Button>
+      <Button size="sm" variant="ghost" @click="selectedIds = new Set(); allSelected = false">取消选择</Button>
+    </div>
+
+    <!-- Batch Action Confirmation Dialog -->
+    <Dialog v-model:open="batchActionDialog">
+      <DialogContent class="max-w-sm">
+        <DialogHeader>
+          <DialogTitle>确认批量操作</DialogTitle>
+          <DialogDescription>
+            <template v-if="batchAction === 'ban'">确定要封禁选中的 {{ selectedIds.size }} 个用户吗？封禁后用户将无法使用服务。</template>
+            <template v-else-if="batchAction === 'unban'">确定要解封选中的 {{ selectedIds.size }} 个用户吗？</template>
+            <template v-else-if="batchAction === 'delete'">确定要删除选中的 {{ selectedIds.size }} 个用户吗？此操作不可撤销！</template>
+            <template v-else-if="batchAction === 'reset_traffic'">确定要重置选中的 {{ selectedIds.size }} 个用户的流量吗？</template>
+            <template v-else-if="batchAction === 'reset_uuid'">确定要重置选中的 {{ selectedIds.size }} 个用户的 UUID 和订阅 Token 吗？</template>
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline" @click="batchActionDialog = false">取消</Button>
+          <Button :variant="batchAction === 'delete' || batchAction === 'ban' ? 'destructive' : 'default'" @click="handleBatchAction">确认</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
     <!-- Create/Edit Dialog -->
     <Dialog v-model:open="dialogOpen">
-      <DialogContent class="max-w-2xl max-h-[85vh] overflow-y-auto">
+      <DialogContent class="max-w-2xl max-h-[85vh] overflow-y-auto scrollbar-none">
         <DialogHeader>
           <DialogTitle>{{ isEdit ? '编辑用户' : '创建用户' }}</DialogTitle>
         </DialogHeader>
@@ -479,14 +581,14 @@ onMounted(() => { fetchData(); loadOptions() })
             <div class="grid gap-2">
               <Label>已用上行</Label>
               <div class="relative">
-                <Input v-model.number="editingUser.upload_used" type="number" min="0" class="pr-12" placeholder="0" />
+                <Input v-model.number="editingUser.upload_used" type="number" min="0" class="pr-12" placeholder="留空则不限制" />
                 <span class="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground pointer-events-none">GB</span>
               </div>
             </div>
             <div class="grid gap-2">
               <Label>已用下行</Label>
               <div class="relative">
-                <Input v-model.number="editingUser.download_used" type="number" min="0" class="pr-12" placeholder="0" />
+                <Input v-model.number="editingUser.download_used" type="number" min="0" class="pr-12" placeholder="留空则不限制" />
                 <span class="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground pointer-events-none">GB</span>
               </div>
             </div>

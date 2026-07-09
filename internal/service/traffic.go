@@ -18,7 +18,7 @@ type TrafficEntry struct {
 }
 
 // RecordTraffic performs a batch insert of traffic log rows and increments
-// each affected user traffic_used counter in a single transaction.
+// each affected user and node traffic counter in a single transaction.
 func RecordTraffic(nodeID uint, entries []TrafficEntry) error {
 	if len(entries) == 0 {
 		return nil
@@ -33,23 +33,39 @@ func RecordTraffic(nodeID uint, entries []TrafficEntry) error {
 				continue
 			}
 
+			upload := int64(e.Upload)
+			download := int64(e.Download)
+			delta := upload + download
+			if delta <= 0 {
+				continue
+			}
+
 			// Insert a traffic log row.
 			logEntry := nexusmodel.TrafficLog{
 				UserID:     user.ID,
 				NodeID:     nodeID,
-				Upload:     int64(e.Upload),
-				Download:   int64(e.Download),
+				Upload:     upload,
+				Download:   download,
 				RecordedAt: time.Now(),
 			}
 			if err := tx.Create(&logEntry).Error; err != nil {
 				return err
 			}
 
-			// Increment the user cumulative traffic counter.
+			// Increment the user cumulative traffic counters.
 			if err := tx.Model(&nexusmodel.User{}).
 				Where("id = ?", user.ID).
-				UpdateColumn("traffic_used", gorm.Expr("traffic_used + ?", e.Upload+e.Download)).
-				Error; err != nil {
+				Updates(map[string]interface{}{
+					"upload_used":   gorm.Expr("upload_used + ?", upload),
+					"download_used": gorm.Expr("download_used + ?", download),
+					"traffic_used":  gorm.Expr("traffic_used + ?", delta),
+				}).Error; err != nil {
+				return err
+			}
+
+			if err := tx.Model(&nexusmodel.Node{}).
+				Where("id = ?", nodeID).
+				UpdateColumn("traffic_used", gorm.Expr("traffic_used + ?", delta)).Error; err != nil {
 				return err
 			}
 		}
