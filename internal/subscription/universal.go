@@ -181,9 +181,11 @@ func buildVlessURI(node model.Node, user model.User, p NodeParams) string {
 	q.Set("type", "tcp")
 	q.Set("fp", "chrome")
 
-	if p.PublicKey != "" && p.ShortID != "" {
+	if node.Security == "reality" && p.PublicKey != "" {
 		q.Set("pbk", p.PublicKey)
-		q.Set("sid", p.ShortID)
+		if p.ShortID != "" {
+			q.Set("sid", p.ShortID)
+		}
 		if p.HandshakeHost != "" {
 			q.Set("sni", p.HandshakeHost)
 		}
@@ -252,10 +254,11 @@ func buildSurgeVLESS(node model.Node, user model.User, p NodeParams) string {
 		sni = node.Address
 	}
 
-	line := fmt.Sprintf("%s = vless, %s, %d, uuid=%s, tls=true, sni=%s",
-		node.Name, node.Address, node.Port, user.UUID, sni)
+	hasTLS := node.Security == "tls" || node.Security == "reality"
+	line := fmt.Sprintf("%s = vless, %s, %d, uuid=%s, tls=%v, sni=%s",
+		node.Name, node.Address, node.Port, user.UUID, hasTLS, sni)
 
-	if p.PublicKey != "" {
+	if node.Security == "reality" && p.PublicKey != "" {
 		line += fmt.Sprintf(", reality-public-key=%s", p.PublicKey)
 		if p.ShortID != "" {
 			line += fmt.Sprintf(", reality-short-id=%s", p.ShortID)

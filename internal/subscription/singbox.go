@@ -44,10 +44,36 @@ type networkSettingsParams struct {
 // ParseNodeParams 从节点的 ConfigJSON 和 NetworkSettings 字段解析连接参数。
 func ParseNodeParams(configJSON string, networkSettings string) NodeParams {
 	var p NodeParams
+
+	// Step 1: 从 config_json 解析扁平字段
 	if configJSON != "" {
 		_ = json.Unmarshal([]byte(configJSON), &p)
+
+		// Step 1b: 尝试从 config_json 的 tls_settings.reality 嵌套结构中提取 Reality 参数
+		// （面板可能以 {"tls_settings":{"reality":{"public_key":"...","short_id":"..."}}} 格式存储）
+		var nested struct {
+			TLSSettings struct {
+				Reality struct {
+					PublicKey string `json:"public_key"`
+					PrivateKey string `json:"private_key"`
+					ShortID    string `json:"short_id"`
+				} `json:"reality"`
+			} `json:"tls_settings"`
+		}
+		if err := json.Unmarshal([]byte(configJSON), &nested); err == nil {
+			if nested.TLSSettings.Reality.PublicKey != "" && p.PublicKey == "" {
+				p.PublicKey = nested.TLSSettings.Reality.PublicKey
+			}
+			if nested.TLSSettings.Reality.PrivateKey != "" && p.PrivateKey == "" {
+				p.PrivateKey = nested.TLSSettings.Reality.PrivateKey
+			}
+			if nested.TLSSettings.Reality.ShortID != "" && p.ShortID == "" {
+				p.ShortID = nested.TLSSettings.Reality.ShortID
+			}
+		}
 	}
-	// NetworkSettings 使用 reality_ 前缀字段名，需要映射到 NodeParams
+
+	// Step 2: NetworkSettings 使用 reality_ 前缀字段名，覆盖 config_json 的值
 	if networkSettings != "" {
 		var ns networkSettingsParams
 		if err := json.Unmarshal([]byte(networkSettings), &ns); err == nil {
@@ -67,8 +93,8 @@ func ParseNodeParams(configJSON string, networkSettings string) NodeParams {
 			if ns.RealityPort > 0 {
 				p.HandshakePort = ns.RealityPort
 			}
-			// TLS server_name（非 Reality）
-			if ns.TLSServerName != "" && p.ServerName == "" {
+			// TLS server_name（非 Reality）— network_settings 覆盖 config_json
+			if ns.TLSServerName != "" {
 				p.ServerName = ns.TLSServerName
 			}
 			// 如果 network_settings 有 server_name 且 config_json 没有，用 reality_server_name 兜底
@@ -227,7 +253,12 @@ func buildSingboxVLESS(node model.Node, user model.User, p NodeParams) (json.Raw
 		ob["flow"] = flow
 	}
 
-	// TLS 配置
+	// TLS 配置 — 仅当 security 为 tls 或 reality 时启用
+	hasTLS := node.Security == "tls" || node.Security == "reality"
+	if !hasTLS {
+		return json.Marshal(ob)
+	}
+
 	serverName := p.ServerName
 	if serverName == "" {
 		serverName = p.HandshakeHost
@@ -238,11 +269,13 @@ func buildSingboxVLESS(node model.Node, user model.User, p NodeParams) (json.Raw
 	if serverName != "" {
 		tlsConfig["server_name"] = serverName
 	}
-	if p.PublicKey != "" && p.ShortID != "" {
+	if node.Security == "reality" && p.PublicKey != "" {
 		reality := map[string]interface{}{
 			"enabled":    true,
 			"public_key": p.PublicKey,
-			"short_id":   p.ShortID,
+		}
+		if p.ShortID != "" {
+			reality["short_id"] = p.ShortID
 		}
 		if p.HandshakeHost != "" {
 			hp := p.HandshakeHost

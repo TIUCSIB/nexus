@@ -433,16 +433,20 @@ func buildClashVLESS(node model.Node, user model.User, p NodeParams) map[string]
 		"cipher":     "auto",
 		"udp":        true,
 		"encryption": "none",
-		"tls":        true,
 	}
 
-	// Flow — only add when explicitly set (Xboard behavior)
+	// TLS — 仅当 security 为 tls 或 reality 时启用
+	hasTLS := node.Security == "tls" || node.Security == "reality"
+	if hasTLS {
+		proxy["tls"] = true
+	}
+
+	// Flow — 仅当显式设置且不为 none 时添加
 	flow := node.FlowControl
 	if flow != "" && flow != "none" {
 		proxy["flow"] = flow
-	} else {
-		proxy["flow"] = nil
 	}
+	// 注意：不要设置 flow: null，某些 Clash 客户端会解析失败
 
 	// Transport
 	if node.Transport != "" && node.Transport != "tcp" {
@@ -459,10 +463,12 @@ func buildClashVLESS(node model.Node, user model.User, p NodeParams) map[string]
 	}
 
 	// Reality 配置
-	if p.PublicKey != "" && p.ShortID != "" {
+	if node.Security == "reality" && p.PublicKey != "" {
 		realityOpts := map[string]interface{}{
 			"public-key": p.PublicKey,
-			"short-id":   p.ShortID,
+		}
+		if p.ShortID != "" {
+			realityOpts["short-id"] = p.ShortID
 		}
 		if p.HandshakeHost != "" {
 			realityOpts["handshake"] = p.HandshakeHost
