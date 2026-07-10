@@ -84,12 +84,16 @@ func (s *SingboxManager) Start(configJSON string) error {
 	}
 	log.Printf("[singbox] config written to %s", configPath)
 
-	// Build command
-	ctx, cancel := context.WithCancel(context.Background())
-	cmd := exec.CommandContext(ctx, s.cfg.BinaryPath, "run", "-c", configPath)
-	cmd.Dir = s.cfg.WorkingDir
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+// Build command
+		ctx, cancel := context.WithCancel(context.Background())
+		cmd := exec.CommandContext(ctx, s.cfg.BinaryPath, "run", "-c", configPath)
+		cmd.Dir = s.cfg.WorkingDir
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		cmd.Env = append(os.Environ(),
+			"ENABLE_DEPRECATED_LEGACY_DNS_FAKEIP_OPTIONS=true",
+			"ENABLE_DEPRECATED_LEGACY_DNS_SERVERS=true",
+		)
 
 	if err := cmd.Start(); err != nil {
 		cancel()
