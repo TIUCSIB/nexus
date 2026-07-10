@@ -436,12 +436,13 @@ func buildClashVLESS(node model.Node, user model.User, p NodeParams) map[string]
 		"tls":        true,
 	}
 
-	// Flow
+	// Flow — only add when explicitly set (Xboard behavior)
 	flow := node.FlowControl
-	if flow == "" || flow == "none" {
-		flow = "xtls-rprx-vision"
+	if flow != "" && flow != "none" {
+		proxy["flow"] = flow
+	} else {
+		proxy["flow"] = nil
 	}
-	proxy["flow"] = flow
 
 	// Transport
 	if node.Transport != "" && node.Transport != "tcp" {

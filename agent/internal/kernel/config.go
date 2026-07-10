@@ -546,26 +546,30 @@ func buildVLESSInbound(nodeConfig NodeConfig, users []User) (vlessInbound, error
 		}
 	}
 
-	return vlessInbound{
-		Type:       "vless",
-		Tag:        "vless-reality",
-		Listen:     listenAddr(nodeConfig.ListenIP),
-		ListenPort: nodeConfig.ServerPort,
-		Users:      vUsers,
-		TLS: vlessTLS{
-			Enabled:    true,
-			ServerName: serverName,
-			Reality: vlessReality{
+	reality := vlessReality{
 				Enabled: true,
 				Handshake: realityHandshake{
 					Server:     handshakeServer,
 					ServerPort: handshakePort,
 				},
 				PrivateKey: privateKey,
-				ShortID:    []string{shortID},
-			},
-		},
-	}, nil
+			}
+			if shortID != "" {
+				reality.ShortID = []string{shortID}
+			}
+
+			return vlessInbound{
+				Type:       "vless",
+				Tag:        "vless-reality",
+				Listen:     listenAddr(nodeConfig.ListenIP),
+				ListenPort: nodeConfig.ServerPort,
+				Users:      vUsers,
+				TLS: vlessTLS{
+					Enabled:    true,
+					ServerName: serverName,
+					Reality:    reality,
+				},
+			}, nil
 }
 
 // Hysteria2 structures
