@@ -8,22 +8,22 @@ import (
 
 // NodeConfig represents the node configuration received from the panel.
 type NodeConfig struct {
-	ConfigMode        string                 `json:"config_mode,omitempty"` // "auto" or "json"
-	ConfigJSON        string                 `json:"config_json,omitempty"` // raw config for json mode
-	NodeID            int                    `json:"node_id,omitempty"`
-	Protocol          string                 `json:"protocol"`
-	ListenIP          string                 `json:"listen_ip"`
-	ServerPort        int                    `json:"server_port"`
-	StatsPort         int                    `json:"stats_port,omitempty"`
-	Network           string                 `json:"network"`
-	NetworkSettings   map[string]interface{} `json:"networkSettings,omitempty"`
-	BaseConfig        BaseConfig             `json:"base_config"`
-	Routes            []RouteRule            `json:"routes,omitempty"`
-	KernelType        string                 `json:"kernel_type,omitempty"`
-	CertConfig        CertConfig             `json:"cert_config,omitempty"`
-	CustomOutbounds   []CustomOutbound       `json:"custom_outbounds,omitempty"`
-	CertPEM           string                 `json:"-"`
-	KeyPEM            string                 `json:"-"`
+	ConfigMode      string                 `json:"config_mode,omitempty"` // "auto" or "json"
+	ConfigJSON      string                 `json:"config_json,omitempty"` // raw config for json mode
+	NodeID          int                    `json:"node_id,omitempty"`
+	Protocol        string                 `json:"protocol"`
+	ListenIP        string                 `json:"listen_ip"`
+	ServerPort      int                    `json:"server_port"`
+	StatsPort       int                    `json:"stats_port,omitempty"`
+	Network         string                 `json:"network"`
+	NetworkSettings map[string]interface{} `json:"networkSettings,omitempty"`
+	BaseConfig      BaseConfig             `json:"base_config"`
+	Routes          []RouteRule            `json:"routes,omitempty"`
+	KernelType      string                 `json:"kernel_type,omitempty"`
+	CertConfig      CertConfig             `json:"cert_config,omitempty"`
+	CustomOutbounds []CustomOutbound       `json:"custom_outbounds,omitempty"`
+	CertPEM         string                 `json:"-"`
+	KeyPEM          string                 `json:"-"`
 
 	// TLS
 	TLS         int                    `json:"tls,omitempty"`
@@ -154,12 +154,12 @@ type SingboxConfig struct {
 }
 
 type dnsConfig struct {
-	Servers         []dnsServer      `json:"servers"`
-	Rules           []dnsRule        `json:"rules"`
-	Final           string           `json:"final"`
-	Strategy        string           `json:"strategy,omitempty"`
-	FakeIP          *fakeIPConfig    `json:"fakeip,omitempty"`
-	IndependentCache bool            `json:"independent_cache"`
+	Servers          []dnsServer   `json:"servers"`
+	Rules            []dnsRule     `json:"rules"`
+	Final            string        `json:"final"`
+	Strategy         string        `json:"strategy,omitempty"`
+	FakeIP           *fakeIPConfig `json:"fakeip,omitempty"`
+	IndependentCache bool          `json:"independent_cache"`
 }
 
 type dnsServer struct {
@@ -192,9 +192,9 @@ type outbound struct {
 }
 
 type routeConfig struct {
-	Rules                []map[string]interface{} `json:"rules"`
-	Final                string                   `json:"final"`
-	DefaultDomainResolver string                  `json:"default_domain_resolver,omitempty"`
+	Rules                 []map[string]interface{} `json:"rules"`
+	Final                 string                   `json:"final"`
+	DefaultDomainResolver string                   `json:"default_domain_resolver,omitempty"`
 }
 
 type experimentalConfig struct {
@@ -264,77 +264,77 @@ func GenerateSingboxConfig(nodeConfig NodeConfig, users []User) (string, error) 
 }
 
 func baseConfig(nodeConfig NodeConfig) SingboxConfig {
-			outbounds := []map[string]interface{}{
-				{"type": "direct", "tag": "direct"},
-				{"type": "block", "tag": "block"},
-			}
-			outbounds = append(outbounds, buildCustomOutbounds(nodeConfig.CustomOutbounds)...)
+	outbounds := []map[string]interface{}{
+		{"type": "direct", "tag": "direct"},
+		{"type": "block", "tag": "block"},
+	}
+	outbounds = append(outbounds, buildCustomOutbounds(nodeConfig.CustomOutbounds)...)
 
-			rules := []map[string]interface{}{
-				{"inbound": []string{"dns-in"}, "action": "hijack-dns"},
-			}
-			rules = append(rules, buildRouteRules(nodeConfig.Routes)...)
+	rules := []map[string]interface{}{
+		{"inbound": []string{"dns-in"}, "action": "hijack-dns"},
+	}
+	rules = append(rules, buildRouteRules(nodeConfig.Routes)...)
 
-		statsPort := nodeConfig.StatsPort
-		if statsPort == 0 {
-			statsPort = 9090
-		}
-
-		return SingboxConfig{
-			Log: logConfig{
-				Level:     "info",
-				Timestamp: true,
-			},
-			DNS: buildDNSConfig(),
-			Outbounds: outbounds,
-			Route: routeConfig{
-				Rules:                 rules,
-				Final:                 "direct",
-				DefaultDomainResolver: "dns-remote",
-			},
-			Experimental: experimentalConfig{
-				CacheFile: cacheFileConfig{
-					Enabled: false,
-				},
-				ClashAPI: clashAPIConfig{
-					ExternalController: fmt.Sprintf("127.0.0.1:%d", statsPort),
-				},
-			},
-		}
+	statsPort := nodeConfig.StatsPort
+	if statsPort == 0 {
+		statsPort = 9090
 	}
 
-	func buildDNSConfig() dnsConfig {
-		return dnsConfig{
-			Servers: []dnsServer{
-				{
-					Tag:     "dns-remote",
-					Address: "https://1.1.1.1/dns-query",
-					Detour:  "direct",
-				},
-				{
-					Tag:     "dns-google",
-					Address: "https://dns.google/dns-query",
-					Detour:  "direct",
-				},
-				{
-					Tag:     "dns-fakeip",
-					Address: "fakeip",
-				},
+	return SingboxConfig{
+		Log: logConfig{
+			Level:     "info",
+			Timestamp: true,
+		},
+		DNS:       buildDNSConfig(),
+		Outbounds: outbounds,
+		Route: routeConfig{
+			Rules:                 rules,
+			Final:                 "direct",
+			DefaultDomainResolver: "dns-remote",
+		},
+		Experimental: experimentalConfig{
+			CacheFile: cacheFileConfig{
+				Enabled: false,
 			},
-Rules: []dnsRule{
+			ClashAPI: clashAPIConfig{
+				ExternalController: fmt.Sprintf("127.0.0.1:%d", statsPort),
+			},
+		},
+	}
+}
+
+func buildDNSConfig() dnsConfig {
+	return dnsConfig{
+		Servers: []dnsServer{
+			{
+				Tag:     "dns-remote",
+				Address: "https://1.1.1.1/dns-query",
+				Detour:  "direct",
+			},
+			{
+				Tag:     "dns-google",
+				Address: "https://dns.google/dns-query",
+				Detour:  "direct",
+			},
+			{
+				Tag:     "dns-fakeip",
+				Address: "fakeip",
+			},
+		},
+		Rules: []dnsRule{
 			{
 				Server: "dns-remote",
 			},
 		},
-			Final:           "dns-remote",
-			IndependentCache: true,
-			FakeIP: &fakeIPConfig{
-				Enabled:    true,
-				Inet4Range: "198.18.0.0/15",
-				Inet6Range: "fc00::/18",
-			},
-		}
+		Final:            "dns-remote",
+		IndependentCache: true,
+		FakeIP: &fakeIPConfig{
+			Enabled:    true,
+			Inet4Range: "198.18.0.0/15",
+			Inet6Range: "fc00::/18",
+		},
 	}
+}
 
 func buildCustomOutbounds(items []CustomOutbound) []map[string]interface{} {
 	out := make([]map[string]interface{}, 0, len(items))
@@ -466,6 +466,7 @@ type vlessInbound struct {
 type vlessUser struct {
 	Name string `json:"name"`
 	UUID string `json:"uuid"`
+	Flow string `json:"flow,omitempty"`
 }
 
 type vlessTLS struct {
@@ -530,12 +531,16 @@ func buildVLESSInbound(nodeConfig NodeConfig, users []User) (vlessInbound, error
 
 	// Build users
 	vUsers := make([]vlessUser, len(users))
+	flow := nodeConfig.Flow
+	if flow == "none" {
+		flow = ""
+	}
 	for i, u := range users {
 		name := u.UUID
 		if len(name) > 8 {
 			name = name[:8]
 		}
-		vUsers[i] = vlessUser{Name: name, UUID: u.UUID}
+		vUsers[i] = vlessUser{Name: name, UUID: u.UUID, Flow: flow}
 	}
 
 	serverName := nodeConfig.ServerName
@@ -546,29 +551,29 @@ func buildVLESSInbound(nodeConfig NodeConfig, users []User) (vlessInbound, error
 	}
 
 	reality := vlessReality{
-				Enabled: true,
-				Handshake: realityHandshake{
-					Server:     handshakeServer,
-					ServerPort: handshakePort,
-				},
-				PrivateKey: privateKey,
-			}
-			if shortID != "" {
-				reality.ShortID = []string{shortID}
-			}
+		Enabled: true,
+		Handshake: realityHandshake{
+			Server:     handshakeServer,
+			ServerPort: handshakePort,
+		},
+		PrivateKey: privateKey,
+	}
+	if shortID != "" {
+		reality.ShortID = []string{shortID}
+	}
 
-			return vlessInbound{
-				Type:       "vless",
-				Tag:        "vless-reality",
-				Listen:     listenAddr(nodeConfig.ListenIP),
-				ListenPort: nodeConfig.ServerPort,
-				Users:      vUsers,
-				TLS: vlessTLS{
-					Enabled:    true,
-					ServerName: serverName,
-					Reality:    reality,
-				},
-			}, nil
+	return vlessInbound{
+		Type:       "vless",
+		Tag:        "vless-reality",
+		Listen:     listenAddr(nodeConfig.ListenIP),
+		ListenPort: nodeConfig.ServerPort,
+		Users:      vUsers,
+		TLS: vlessTLS{
+			Enabled:    true,
+			ServerName: serverName,
+			Reality:    reality,
+		},
+	}, nil
 }
 
 // Hysteria2 structures

@@ -11,32 +11,32 @@ import (
 
 // clashConfig 是 Clash/Clash.Meta 配置文件的顶层结构。
 type clashConfig struct {
-	MixedPort         int              `yaml:"mixed-port"`
-	AllowLan          bool             `yaml:"allow-lan"`
-	BindAddress       string           `yaml:"bind-address,omitempty"`
-	Mode              string           `yaml:"mode"`
-	LogLevel          string           `yaml:"log-level"`
-	ExternalController string          `yaml:"external-controller,omitempty"`
-	UnifiedDelay      bool             `yaml:"unified-delay,omitempty"`
-	TCPConcurrent     bool             `yaml:"tcp-concurrent,omitempty"`
-	DNS               *clashDNS        `yaml:"dns,omitempty"`
-	Proxies           []interface{}    `yaml:"proxies"`
-	ProxyGroups       []clashGroup     `yaml:"proxy-groups"`
-	Rules             []string         `yaml:"rules"`
+	MixedPort          int           `yaml:"mixed-port"`
+	AllowLan           bool          `yaml:"allow-lan"`
+	BindAddress        string        `yaml:"bind-address,omitempty"`
+	Mode               string        `yaml:"mode"`
+	LogLevel           string        `yaml:"log-level"`
+	ExternalController string        `yaml:"external-controller,omitempty"`
+	UnifiedDelay       bool          `yaml:"unified-delay,omitempty"`
+	TCPConcurrent      bool          `yaml:"tcp-concurrent,omitempty"`
+	DNS                *clashDNS     `yaml:"dns,omitempty"`
+	Proxies            []interface{} `yaml:"proxies"`
+	ProxyGroups        []clashGroup  `yaml:"proxy-groups"`
+	Rules              []string      `yaml:"rules"`
 }
 
 type clashDNS struct {
-	Enable           bool              `yaml:"enable"`
-	IPv6             bool              `yaml:"ipv6"`
-	DefaultNameserver []string         `yaml:"default-nameserver"`
-	EnhancedMode     string            `yaml:"enhanced-mode"`
-	FakeIPRange      string            `yaml:"fake-ip-range"`
-	UseHosts         bool              `yaml:"use-hosts"`
-	NameserverPolicy map[string]string `yaml:"nameserver-policy,omitempty"`
-	Nameserver       []string          `yaml:"nameserver"`
-	Fallback         []string          `yaml:"fallback,omitempty"`
-	FallbackFilter   *clashFallbackFilter `yaml:"fallback-filter,omitempty"`
-	FakeIPFilter     []string          `yaml:"fake-ip-filter,omitempty"`
+	Enable            bool                 `yaml:"enable"`
+	IPv6              bool                 `yaml:"ipv6"`
+	DefaultNameserver []string             `yaml:"default-nameserver"`
+	EnhancedMode      string               `yaml:"enhanced-mode"`
+	FakeIPRange       string               `yaml:"fake-ip-range"`
+	UseHosts          bool                 `yaml:"use-hosts"`
+	NameserverPolicy  map[string]string    `yaml:"nameserver-policy,omitempty"`
+	Nameserver        []string             `yaml:"nameserver"`
+	Fallback          []string             `yaml:"fallback,omitempty"`
+	FallbackFilter    *clashFallbackFilter `yaml:"fallback-filter,omitempty"`
+	FakeIPFilter      []string             `yaml:"fake-ip-filter,omitempty"`
 }
 
 type clashFallbackFilter struct {
@@ -47,12 +47,12 @@ type clashFallbackFilter struct {
 }
 
 type clashGroup struct {
-	Name    string   `yaml:"name"`
-	Type    string   `yaml:"type"`
-	Proxies []string `yaml:"proxies"`
-	URL     string   `yaml:"url,omitempty"`
-	Interval int     `yaml:"interval,omitempty"`
-	Tolerance int    `yaml:"tolerance,omitempty"`
+	Name      string   `yaml:"name"`
+	Type      string   `yaml:"type"`
+	Proxies   []string `yaml:"proxies"`
+	URL       string   `yaml:"url,omitempty"`
+	Interval  int      `yaml:"interval,omitempty"`
+	Tolerance int      `yaml:"tolerance,omitempty"`
 }
 
 // GenerateClash 生成 Clash/Mihomo 格式的 YAML 配置（Xboard 风格）。
@@ -67,28 +67,28 @@ func GenerateClash(nodes []model.Node, user model.User, appName string) ([]byte,
 		UnifiedDelay:       true,
 		TCPConcurrent:      true,
 		DNS: &clashDNS{
-			Enable:           true,
-			IPv6:             false,
+			Enable:            true,
+			IPv6:              false,
 			DefaultNameserver: []string{"223.5.5.5", "119.29.29.29"},
-			EnhancedMode:     "fake-ip",
-			FakeIPRange:      "198.18.0.1/16",
-			UseHosts:         true,
+			EnhancedMode:      "fake-ip",
+			FakeIPRange:       "198.18.0.1/16",
+			UseHosts:          true,
 			NameserverPolicy: map[string]string{
-				"+.google.com":         "https://dns.cloudflare.com/dns-query",
-				"+.googleapis.com":     "https://dns.cloudflare.com/dns-query",
-				"+.googleapis.cn":      "https://dns.cloudflare.com/dns-query",
-				"+.googlevideo.com":    "https://dns.cloudflare.com/dns-query",
-				"+.gstatic.com":        "https://dns.cloudflare.com/dns-query",
-				"+.youtube.com":        "https://dns.cloudflare.com/dns-query",
-				"+.youtu.be":           "https://dns.cloudflare.com/dns-query",
-				"+.facebook.com":       "https://dns.cloudflare.com/dns-query",
-				"+.twitter.com":        "https://dns.cloudflare.com/dns-query",
-				"+.x.com":              "https://dns.cloudflare.com/dns-query",
-				"+.github.com":         "https://dns.cloudflare.com/dns-query",
+				"+.google.com":            "https://dns.cloudflare.com/dns-query",
+				"+.googleapis.com":        "https://dns.cloudflare.com/dns-query",
+				"+.googleapis.cn":         "https://dns.cloudflare.com/dns-query",
+				"+.googlevideo.com":       "https://dns.cloudflare.com/dns-query",
+				"+.gstatic.com":           "https://dns.cloudflare.com/dns-query",
+				"+.youtube.com":           "https://dns.cloudflare.com/dns-query",
+				"+.youtu.be":              "https://dns.cloudflare.com/dns-query",
+				"+.facebook.com":          "https://dns.cloudflare.com/dns-query",
+				"+.twitter.com":           "https://dns.cloudflare.com/dns-query",
+				"+.x.com":                 "https://dns.cloudflare.com/dns-query",
+				"+.github.com":            "https://dns.cloudflare.com/dns-query",
 				"+.githubusercontent.com": "https://dns.cloudflare.com/dns-query",
-				"+.openai.com":         "https://dns.cloudflare.com/dns-query",
-				"+.chatgpt.com":        "https://dns.cloudflare.com/dns-query",
-				"+.anthropic.com":      "https://dns.cloudflare.com/dns-query",
+				"+.openai.com":            "https://dns.cloudflare.com/dns-query",
+				"+.chatgpt.com":           "https://dns.cloudflare.com/dns-query",
+				"+.anthropic.com":         "https://dns.cloudflare.com/dns-query",
 			},
 			Nameserver: []string{
 				"https://doh.pub/dns-query",
@@ -124,10 +124,10 @@ func GenerateClash(nodes []model.Node, user model.User, appName string) ([]byte,
 				"*.*.xboxlive.com", "+.msftncsi.com", "+.msftconnecttest.com",
 			},
 		},
-Proxies:     make([]interface{}, 0),
-			ProxyGroups: make([]clashGroup, 0),
-			Rules:       buildClashRules(),
-		}
+		Proxies:     make([]interface{}, 0),
+		ProxyGroups: make([]clashGroup, 0),
+		Rules:       buildClashRules(),
+	}
 
 	// 构建代理
 	nodeNames := make([]string, 0)
@@ -402,11 +402,11 @@ func buildProxyGroups(cfg clashConfig, allNames []string, appName string) clashC
 			Proxies: append([]string{"自动选择", "故障转移", "DIRECT"}, allNames...),
 		},
 		{
-			Name:     "自动选择",
-			Type:     "url-test",
-			Proxies:  allNames,
-			URL:      "http://www.gstatic.com/generate_204",
-			Interval: 300,
+			Name:      "自动选择",
+			Type:      "url-test",
+			Proxies:   allNames,
+			URL:       "http://www.gstatic.com/generate_204",
+			Interval:  300,
 			Tolerance: 50,
 		},
 		{
@@ -459,10 +459,12 @@ func buildClashVLESS(node model.Node, user model.User, p NodeParams) map[string]
 	}
 
 	// Reality 配置
-	if p.PublicKey != "" && p.ShortID != "" {
+	if p.PublicKey != "" {
 		realityOpts := map[string]interface{}{
 			"public-key": p.PublicKey,
-			"short-id":   p.ShortID,
+		}
+		if p.ShortID != "" {
+			realityOpts["short-id"] = p.ShortID
 		}
 		if p.HandshakeHost != "" {
 			realityOpts["handshake"] = p.HandshakeHost

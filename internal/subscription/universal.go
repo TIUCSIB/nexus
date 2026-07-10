@@ -181,12 +181,19 @@ func buildVlessURI(node model.Node, user model.User, p NodeParams) string {
 	q.Set("type", "tcp")
 	q.Set("fp", "chrome")
 
-	if p.PublicKey != "" && p.ShortID != "" {
+	if p.PublicKey != "" {
 		q.Set("pbk", p.PublicKey)
-		q.Set("sid", p.ShortID)
-		if p.HandshakeHost != "" {
-			q.Set("sni", p.HandshakeHost)
+		if p.ShortID != "" {
+			q.Set("sid", p.ShortID)
 		}
+		realitySNI := p.ServerName
+		if realitySNI == "" {
+			realitySNI = p.HandshakeHost
+		}
+		if realitySNI == "" {
+			realitySNI = sni
+		}
+		q.Set("sni", realitySNI)
 	} else {
 		q.Set("sni", sni)
 	}

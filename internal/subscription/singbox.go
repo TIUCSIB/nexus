@@ -1,8 +1,11 @@
 package subscription
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"strings"
+
+	"golang.org/x/crypto/curve25519"
 
 	"nexus/internal/model"
 )
@@ -31,8 +34,8 @@ type networkSettingsParams struct {
 	RealityPublicKey  string `json:"reality_public_key"`
 	RealityShortID    string `json:"reality_short_id"`
 	// TLS (non-Reality)
-	TLSServerName  string `json:"server_name"`
-	AllowInsecure  bool   `json:"allow_insecure"`
+	TLSServerName string `json:"server_name"`
+	AllowInsecure bool   `json:"allow_insecure"`
 	// Hysteria2
 	UpMbps       int    `json:"up_mbps"`
 	DownMbps     int    `json:"down_mbps"`
@@ -67,11 +70,11 @@ func ParseNodeParams(configJSON string, networkSettings string) NodeParams {
 			if ns.RealityPort > 0 {
 				p.HandshakePort = ns.RealityPort
 			}
-			// TLS server_name（非 Reality）
-			if ns.TLSServerName != "" && p.ServerName == "" {
+			// TLS server_name（非 Reality）：network_settings 优先于 config_json
+			if ns.TLSServerName != "" {
 				p.ServerName = ns.TLSServerName
 			}
-			// 如果 network_settings 有 server_name 且 config_json 没有，用 reality_server_name 兜底
+			// 如果 network_settings 有 reality_server_name 且当前仍为空，用作兜底
 			if p.ServerName == "" && ns.RealityServerName != "" {
 				p.ServerName = ns.RealityServerName
 			}
@@ -90,7 +93,32 @@ func ParseNodeParams(configJSON string, networkSettings string) NodeParams {
 			}
 		}
 	}
+
+	// 若订阅侧缺少 public_key，但节点配置了 private_key（服务端 REALITY 使用），
+	// 则根据 X25519 从 private_key 推导 public_key，保证客户端与服务端密钥配对一致。
+	// 这样即使管理员只填了 private_key，订阅也能正确生成 reality 参数。
+	if p.PublicKey == "" && p.PrivateKey != "" {
+		if derived, ok := deriveRealityPublicKey(p.PrivateKey); ok {
+			p.PublicKey = derived
+		}
+	}
+
 	return p
+}
+
+// deriveRealityPublicKey 从 REALITY 私钥推导对应的公钥。
+// 服务端使用 private_key，客户端需要与之配对的 public_key（X25519(private_key)）。
+// 与后台 AdminGenerateRealityKeys 使用相同的 base64url 编码，结果可直接用于订阅。
+func deriveRealityPublicKey(privateKey string) (string, bool) {
+	raw, err := base64.RawURLEncoding.DecodeString(privateKey)
+	if err != nil || len(raw) != 32 {
+		return "", false
+	}
+	pub, err := curve25519.X25519(raw, curve25519.Basepoint)
+	if err != nil {
+		return "", false
+	}
+	return base64.RawURLEncoding.EncodeToString(pub), true
 }
 
 // GenerateSingbox 生成 sing-box 客户端配置 JSON。
@@ -140,11 +168,11 @@ func GenerateSingbox(nodes []model.Node, user model.User) ([]byte, error) {
 	// 添加 urltest（自动选择）outbound
 	if len(proxyTags) > 0 {
 		urltest := map[string]interface{}{
-			"type":    "urltest",
-			"tag":     "proxy",
+			"type":      "urltest",
+			"tag":       "proxy",
 			"outbounds": proxyTags,
-			"url":     "https://www.gstatic.com/generate_204",
-			"interval": "3m",
+			"url":       "https://www.gstatic.com/generate_204",
+			"interval":  "3m",
 		}
 		urltestBytes, _ := json.Marshal(urltest)
 		outbounds = append(outbounds, urltestBytes)
@@ -180,7 +208,7 @@ func GenerateSingbox(nodes []model.Node, user model.User) ([]byte, error) {
 			"rules": []map[string]interface{}{
 				{"server": "local"},
 			},
-			"final":            "google",
+			"final":             "google",
 			"independent_cache": true,
 		},
 		"inbounds": []map[string]interface{}{
@@ -195,7 +223,7 @@ func GenerateSingbox(nodes []model.Node, user model.User) ([]byte, error) {
 		"route": map[string]interface{}{
 			"rules": []map[string]interface{}{
 				{
-					"action": "hijack-dns",
+					"action":  "hijack-dns",
 					"inbound": []string{"mixed-in"},
 				},
 				{
@@ -213,11 +241,11 @@ func GenerateSingbox(nodes []model.Node, user model.User) ([]byte, error) {
 
 func buildSingboxVLESS(node model.Node, user model.User, p NodeParams) (json.RawMessage, error) {
 	ob := map[string]interface{}{
-		"type":           "vless",
-		"tag":            node.Name,
-		"server":         node.Address,
-		"server_port":    node.Port,
-		"uuid":           user.UUID,
+		"type":            "vless",
+		"tag":             node.Name,
+		"server":          node.Address,
+		"server_port":     node.Port,
+		"uuid":            user.UUID,
 		"packet_encoding": "xudp",
 	}
 
@@ -238,11 +266,13 @@ func buildSingboxVLESS(node model.Node, user model.User, p NodeParams) (json.Raw
 	if serverName != "" {
 		tlsConfig["server_name"] = serverName
 	}
-	if p.PublicKey != "" && p.ShortID != "" {
+	if p.PublicKey != "" {
 		reality := map[string]interface{}{
 			"enabled":    true,
 			"public_key": p.PublicKey,
-			"short_id":   p.ShortID,
+		}
+		if p.ShortID != "" {
+			reality["short_id"] = p.ShortID
 		}
 		if p.HandshakeHost != "" {
 			hp := p.HandshakeHost
@@ -317,12 +347,12 @@ func buildSingboxTUIC(node model.Node, user model.User, p NodeParams) (json.RawM
 	}
 
 	ob := map[string]interface{}{
-		"type":        "tuic",
-		"tag":         node.Name,
-		"server":      node.Address,
-		"server_port": node.Port,
-		"uuid":        user.UUID,
-		"password":    password,
+		"type":               "tuic",
+		"tag":                node.Name,
+		"server":             node.Address,
+		"server_port":        node.Port,
+		"uuid":               user.UUID,
+		"password":           password,
 		"congestion_control": congestion,
 	}
 

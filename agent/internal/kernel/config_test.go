@@ -13,6 +13,7 @@ func makeNodeConfig(protocol string) NodeConfig {
 		StatsPort:  9090,
 		Network:    "tcp",
 		ServerName: "test.example.com",
+		Flow:       "xtls-rprx-vision",
 		TLSSettings: map[string]interface{}{
 			"reality": map[string]interface{}{
 				"private_key": "test-private-key",
@@ -49,8 +50,14 @@ func TestGenerateSingboxConfig_VLESS(t *testing.T) {
 	if !strings.Contains(out, "fakeip") {
 		t.Error("output should contain fakeip config")
 	}
-	if !strings.Contains(out, "dns-out") {
-		t.Error("output should contain dns-out outbound")
+	if !strings.Contains(out, "direct") {
+		t.Error("output should contain direct outbound")
+	}
+	if !strings.Contains(out, "block") {
+		t.Error("output should contain block outbound")
+	}
+	if !strings.Contains(out, "xtls-rprx-vision") {
+		t.Error("vless output should include configured flow")
 	}
 }
 
@@ -108,8 +115,11 @@ func TestGenerateSingboxConfig_EmptyUsers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateSingboxConfig empty users error: %v", err)
 	}
-	if !strings.Contains(out, "dns-out") {
-		t.Error("output should contain standard outbounds even with no users")
+	if !strings.Contains(out, "direct") {
+		t.Error("output should contain direct outbound even with no users")
+	}
+	if !strings.Contains(out, "block") {
+		t.Error("output should contain block outbound even with no users")
 	}
 }
 
