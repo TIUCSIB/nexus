@@ -203,7 +203,8 @@ type experimentalConfig struct {
 }
 
 type cacheFileConfig struct {
-	Enabled bool `json:"enabled"`
+	Enabled bool   `json:"enabled"`
+	Path    string `json:"path,omitempty"`
 }
 
 type clashAPIConfig struct {
@@ -292,7 +293,10 @@ func baseConfig(nodeConfig NodeConfig) SingboxConfig {
 				DefaultDomainResolver: "dns-remote",
 			},
 			Experimental: experimentalConfig{
-				CacheFile: cacheFileConfig{Enabled: true},
+				CacheFile: cacheFileConfig{
+					Enabled: true,
+					Path:    "cache.db",
+				},
 				ClashAPI: clashAPIConfig{
 					ExternalController: fmt.Sprintf("127.0.0.1:%d", statsPort),
 				},
