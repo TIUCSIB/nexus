@@ -247,17 +247,16 @@ func GenerateSingboxConfig(nodeConfig NodeConfig, users []User) (string, error) 
 }
 
 func baseConfig(nodeConfig NodeConfig) SingboxConfig {
-		outbounds := []map[string]interface{}{
-			{"type": "direct", "tag": "direct"},
-			{"type": "block", "tag": "block"},
-			{"type": "dns", "tag": "dns-out"},
-		}
-		outbounds = append(outbounds, buildCustomOutbounds(nodeConfig.CustomOutbounds)...)
+			outbounds := []map[string]interface{}{
+				{"type": "direct", "tag": "direct"},
+				{"type": "block", "tag": "block"},
+			}
+			outbounds = append(outbounds, buildCustomOutbounds(nodeConfig.CustomOutbounds)...)
 
-		rules := []map[string]interface{}{
-			{"inbound": []string{"dns-in"}, "outbound": "dns-out"},
-		}
-		rules = append(rules, buildRouteRules(nodeConfig.Routes)...)
+			rules := []map[string]interface{}{
+				{"inbound": []string{"dns-in"}, "action": "hijack-dns"},
+			}
+			rules = append(rules, buildRouteRules(nodeConfig.Routes)...)
 
 		statsPort := nodeConfig.StatsPort
 		if statsPort == 0 {
