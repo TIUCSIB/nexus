@@ -192,8 +192,9 @@ type outbound struct {
 }
 
 type routeConfig struct {
-	Rules []map[string]interface{} `json:"rules"`
-	Final string                   `json:"final"`
+	Rules                []map[string]interface{} `json:"rules"`
+	Final                string                   `json:"final"`
+	DefaultDomainResolver string                  `json:"default_domain_resolver,omitempty"`
 }
 
 type experimentalConfig struct {
@@ -271,8 +272,9 @@ func baseConfig(nodeConfig NodeConfig) SingboxConfig {
 			DNS: buildDNSConfig(),
 			Outbounds: outbounds,
 			Route: routeConfig{
-				Rules: rules,
-				Final: "direct",
+				Rules:                 rules,
+				Final:                 "direct",
+				DefaultDomainResolver: "dns-remote",
 			},
 			Experimental: experimentalConfig{
 				CacheFile: cacheFileConfig{Enabled: true},
