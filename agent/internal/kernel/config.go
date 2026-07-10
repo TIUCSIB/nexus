@@ -210,6 +210,21 @@ type clashAPIConfig struct {
 	ExternalController string `json:"external_controller"`
 }
 
+// listenAddr normalizes the listen IP for sing-box inbound.
+// If the configured IP is not a special address (0.0.0.0, 127.0.0.1, ::),
+// it defaults to 0.0.0.0 to avoid "cannot assign requested address" errors
+// when the public IP isn't directly bound to a network interface.
+func listenAddr(ip string) string {
+	if ip == "" || ip == "0.0.0.0" || ip == "127.0.0.1" || ip == "::" || ip == "::1" {
+		if ip == "" {
+			return "0.0.0.0"
+		}
+		return ip
+	}
+	// Public/private IPs that might not be bound to the interface — use 0.0.0.0
+	return "0.0.0.0"
+}
+
 // GenerateSingboxConfig generates a complete sing-box configuration from node parameters and users.
 func GenerateSingboxConfig(nodeConfig NodeConfig, users []User) (string, error) {
 	cfg := baseConfig(nodeConfig)
@@ -518,7 +533,7 @@ func buildVLESSInbound(nodeConfig NodeConfig, users []User) (vlessInbound, error
 	return vlessInbound{
 		Type:       "vless",
 		Tag:        "vless-reality",
-		Listen:     nodeConfig.ListenIP,
+		Listen:     listenAddr(nodeConfig.ListenIP),
 		ListenPort: nodeConfig.ServerPort,
 		Users:      vUsers,
 		TLS: vlessTLS{
@@ -594,7 +609,7 @@ func buildHysteria2Inbound(nodeConfig NodeConfig, users []User) (hysteria2Inboun
 	in := hysteria2Inbound{
 		Type:       "hysteria2",
 		Tag:        "hysteria2-in",
-		Listen:     nodeConfig.ListenIP,
+		Listen:     listenAddr(nodeConfig.ListenIP),
 		ListenPort: nodeConfig.ServerPort,
 		Users:      hyUsers,
 		TLS: hysteria2TLS{
@@ -669,7 +684,7 @@ func buildTUICInbound(nodeConfig NodeConfig, users []User) (tuicInbound, error) 
 	in := tuicInbound{
 		Type:              "tuic",
 		Tag:               "tuic-in",
-		Listen:            nodeConfig.ListenIP,
+		Listen:            listenAddr(nodeConfig.ListenIP),
 		ListenPort:        nodeConfig.ServerPort,
 		Users:             tUsers,
 		CongestionControl: congestion,
