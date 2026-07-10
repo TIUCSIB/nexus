@@ -93,6 +93,7 @@ func (s *SingboxManager) Start(configJSON string) error {
 		cmd.Env = append(os.Environ(),
 			"ENABLE_DEPRECATED_LEGACY_DNS_FAKEIP_OPTIONS=true",
 			"ENABLE_DEPRECATED_LEGACY_DNS_SERVERS=true",
+			"ENABLE_DEPRECATED_OUTBOUND_DNS_RULE_ITEM=true",
 		)
 
 	if err := cmd.Start(); err != nil {

@@ -301,12 +301,11 @@ func baseConfig(nodeConfig NodeConfig) SingboxConfig {
 					Address: "fakeip",
 				},
 			},
-			Rules: []dnsRule{
-				{
-					Outbound: []string{"any"},
-					Server:   "dns-remote",
-				},
+Rules: []dnsRule{
+			{
+				Server: "dns-remote",
 			},
+		},
 			Final:           "dns-remote",
 			IndependentCache: true,
 			FakeIP: &fakeIPConfig{
