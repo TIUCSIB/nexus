@@ -421,22 +421,40 @@ func buildProxyGroups(cfg clashConfig, allNames []string, appName string) clashC
 	return cfg
 }
 
-// buildClashVLESS 构建 VLESS 代理配置
+// buildClashVLESS 构建 VLESS 代理配置（Xboard 风格）
 func buildClashVLESS(node model.Node, user model.User, p NodeParams) map[string]interface{} {
 	proxy := map[string]interface{}{
-		"name":          node.Name,
-		"type":          "vless",
-		"server":        node.Address,
-		"port":          node.Port,
-		"uuid":          user.UUID,
-		"flow":          "xtls-rprx-vision",
-		"network":       "tcp",
-		"tls":           true,
-		"udp":           true,
+		"name":       node.Name,
+		"type":       "vless",
+		"server":     node.Address,
+		"port":       node.Port,
+		"uuid":       user.UUID,
+		"alterId":    0,
+		"cipher":     "auto",
+		"udp":        true,
+		"encryption": "none",
+		"tls":        true,
 	}
 
-	if p.ServerName != "" {
-		proxy["servername"] = p.ServerName
+	// Flow
+	flow := node.FlowControl
+	if flow == "" || flow == "none" {
+		flow = "xtls-rprx-vision"
+	}
+	proxy["flow"] = flow
+
+	// Transport
+	if node.Transport != "" && node.Transport != "tcp" {
+		proxy["network"] = node.Transport
+	}
+
+	// TLS servername（Reality 时为 handshake dest server）
+	serverName := p.ServerName
+	if serverName == "" {
+		serverName = p.HandshakeHost
+	}
+	if serverName != "" {
+		proxy["servername"] = serverName
 	}
 
 	// Reality 配置

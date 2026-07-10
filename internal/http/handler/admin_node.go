@@ -394,6 +394,7 @@ func buildDefaultConfigJSON(protocol string) string {
 		params = map[string]interface{}{
 			"server_name":      "",
 			"private_key":      "",
+			"public_key":       "",
 			"short_id":         "6ba85179e30d4fc2",
 			"handshake_server": "www.microsoft.com",
 			"handshake_port":   443,

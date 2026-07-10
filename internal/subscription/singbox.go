@@ -21,16 +21,74 @@ type NodeParams struct {
 	CongestionCtrl string `json:"congestion_control"`
 }
 
+// networkSettingsParams 解析前端 network_settings 中的字段。
+// 前端使用 reality_ 前缀存储 Reality 参数，与 NodeParams 的 JSON tag 不同。
+type networkSettingsParams struct {
+	// Reality
+	RealityServerName string `json:"reality_server_name"`
+	RealityPort       int    `json:"reality_port"`
+	RealityPrivateKey string `json:"reality_private_key"`
+	RealityPublicKey  string `json:"reality_public_key"`
+	RealityShortID    string `json:"reality_short_id"`
+	// TLS (non-Reality)
+	TLSServerName  string `json:"server_name"`
+	AllowInsecure  bool   `json:"allow_insecure"`
+	// Hysteria2
+	UpMbps       int    `json:"up_mbps"`
+	DownMbps     int    `json:"down_mbps"`
+	ObfsPassword string `json:"obfs_password"`
+	// TUIC
+	CongestionCtrl string `json:"congestion_control"`
+}
+
 // ParseNodeParams 从节点的 ConfigJSON 和 NetworkSettings 字段解析连接参数。
 func ParseNodeParams(configJSON string, networkSettings string) NodeParams {
 	var p NodeParams
-	if configJSON == "" {
-		return p
+	if configJSON != "" {
+		_ = json.Unmarshal([]byte(configJSON), &p)
 	}
-	_ = json.Unmarshal([]byte(configJSON), &p)
-	// NetworkSettings 中的字段覆盖 ConfigJSON 的默认值
+	// NetworkSettings 使用 reality_ 前缀字段名，需要映射到 NodeParams
 	if networkSettings != "" {
-		_ = json.Unmarshal([]byte(networkSettings), &p)
+		var ns networkSettingsParams
+		if err := json.Unmarshal([]byte(networkSettings), &ns); err == nil {
+			// Reality 参数映射
+			if ns.RealityPublicKey != "" {
+				p.PublicKey = ns.RealityPublicKey
+			}
+			if ns.RealityPrivateKey != "" {
+				p.PrivateKey = ns.RealityPrivateKey
+			}
+			if ns.RealityShortID != "" {
+				p.ShortID = ns.RealityShortID
+			}
+			if ns.RealityServerName != "" {
+				p.HandshakeHost = ns.RealityServerName
+			}
+			if ns.RealityPort > 0 {
+				p.HandshakePort = ns.RealityPort
+			}
+			// TLS server_name（非 Reality）
+			if ns.TLSServerName != "" && p.ServerName == "" {
+				p.ServerName = ns.TLSServerName
+			}
+			// 如果 network_settings 有 server_name 且 config_json 没有，用 reality_server_name 兜底
+			if p.ServerName == "" && ns.RealityServerName != "" {
+				p.ServerName = ns.RealityServerName
+			}
+			// Hysteria2 / TUIC
+			if ns.UpMbps > 0 {
+				p.UpMbps = ns.UpMbps
+			}
+			if ns.DownMbps > 0 {
+				p.DownMbps = ns.DownMbps
+			}
+			if ns.ObfsPassword != "" {
+				p.ObfsPassword = ns.ObfsPassword
+			}
+			if ns.CongestionCtrl != "" {
+				p.CongestionCtrl = ns.CongestionCtrl
+			}
+		}
 	}
 	return p
 }
@@ -109,33 +167,27 @@ func GenerateSingbox(nodes []model.Node, user model.User) ([]byte, error) {
 	blockBytes, _ := json.Marshal(block)
 	outbounds = append(outbounds, blockBytes)
 
-// dns outbound
-		dnsOB := map[string]interface{}{
-			"type": "dns",
-			"tag":  "dns-out",
-		}
-		dnsBytes, _ := json.Marshal(dnsOB)
-		outbounds = append(outbounds, dnsBytes)
-
-		// 构建完整配置
+	// 构建完整配置
 	config := map[string]interface{}{
 		"log": map[string]interface{}{
 			"level": "info",
 		},
 		"dns": map[string]interface{}{
 			"servers": []map[string]interface{}{
-				{"tag": "google", "address": "tls://8.8.8.8"},
+				{"tag": "google", "address": "tls://8.8.8.8", "detour": "proxy"},
 				{"tag": "local", "address": "local"},
 			},
 			"rules": []map[string]interface{}{
-				{"outbound": []string{"any"}, "server": "local"},
+				{"server": "local"},
 			},
+			"final":            "google",
+			"independent_cache": true,
 		},
 		"inbounds": []map[string]interface{}{
 			{
-				"type":    "mixed",
-				"tag":     "mixed-in",
-				"listen":  "127.0.0.1",
+				"type":        "mixed",
+				"tag":         "mixed-in",
+				"listen":      "127.0.0.1",
 				"listen_port": 2080,
 			},
 		},
@@ -143,15 +195,15 @@ func GenerateSingbox(nodes []model.Node, user model.User) ([]byte, error) {
 		"route": map[string]interface{}{
 			"rules": []map[string]interface{}{
 				{
-					"protocol": "dns",
-					"outbound": "dns-out",
+					"action": "hijack-dns",
+					"inbound": []string{"mixed-in"},
 				},
 				{
 					"ip_is_private": true,
 					"outbound":      "direct",
 				},
 			},
-			"final":        "proxy",
+			"final":                 "proxy",
 			"auto_detect_interface": true,
 		},
 	}
@@ -160,23 +212,31 @@ func GenerateSingbox(nodes []model.Node, user model.User) ([]byte, error) {
 }
 
 func buildSingboxVLESS(node model.Node, user model.User, p NodeParams) (json.RawMessage, error) {
-	flow := node.FlowControl
-	if flow == "" {
-		flow = "none"
-	}
 	ob := map[string]interface{}{
-		"type":        "vless",
-		"tag":         node.Name,
-		"server":      node.Address,
-		"server_port": node.Port,
-		"uuid":        user.UUID,
-		"flow":        flow,
+		"type":           "vless",
+		"tag":            node.Name,
+		"server":         node.Address,
+		"server_port":    node.Port,
+		"uuid":           user.UUID,
+		"packet_encoding": "xudp",
+	}
+
+	// Flow
+	flow := node.FlowControl
+	if flow != "" && flow != "none" {
+		ob["flow"] = flow
 	}
 
 	// TLS 配置
+	serverName := p.ServerName
+	if serverName == "" {
+		serverName = p.HandshakeHost
+	}
 	tlsConfig := map[string]interface{}{
 		"enabled": true,
-		"server_name": p.ServerName,
+	}
+	if serverName != "" {
+		tlsConfig["server_name"] = serverName
 	}
 	if p.PublicKey != "" && p.ShortID != "" {
 		reality := map[string]interface{}{
@@ -186,26 +246,22 @@ func buildSingboxVLESS(node model.Node, user model.User, p NodeParams) (json.Raw
 		}
 		if p.HandshakeHost != "" {
 			hp := p.HandshakeHost
-			if p.HandshakePort > 0 {
-				reality["handshake"] = map[string]interface{}{
-					"server": hp,
-					"server_port": p.HandshakePort,
-				}
-			} else {
-				reality["handshake"] = map[string]interface{}{
-					"server": hp,
-					"server_port": 443,
-				}
+			port := p.HandshakePort
+			if port == 0 {
+				port = 443
+			}
+			reality["handshake"] = map[string]interface{}{
+				"server":      hp,
+				"server_port": port,
 			}
 		}
 		tlsConfig["reality"] = reality
+		tlsConfig["utls"] = map[string]interface{}{
+			"enabled":     true,
+			"fingerprint": "chrome",
+		}
 	}
 	ob["tls"] = tlsConfig
-
-	// transport
-	ob["transport"] = map[string]interface{}{
-		"type": "tcp",
-	}
 
 	return json.Marshal(ob)
 }
