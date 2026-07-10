@@ -489,22 +489,34 @@ func buildVLESSInbound(nodeConfig NodeConfig, users []User) (vlessInbound, error
 		tlsSettings = make(map[string]interface{})
 	}
 
-	// Extract Reality settings
+	// Extract Reality settings — handle both nested {"reality": {...}} and flat format
 	realitySettings, _ := tlsSettings["reality"].(map[string]interface{})
 	privateKey := ""
 	shortID := ""
 	handshakeServer := nodeConfig.ServerName
 	handshakePort := 443
 
+	// Try flat format first (directly in tls_settings)
+	if pk, ok := tlsSettings["private_key"].(string); ok {
+		privateKey = pk
+	}
+	if sid, ok := tlsSettings["short_id"].(string); ok {
+		shortID = sid
+	}
+	if hs, ok := tlsSettings["server_name"].(string); ok && hs != "" {
+		handshakeServer = hs
+	}
+
+	// Override with nested reality format if present
 	if realitySettings != nil {
-		if pk, ok := realitySettings["private_key"].(string); ok {
+		if pk, ok := realitySettings["private_key"].(string); ok && pk != "" {
 			privateKey = pk
 		}
-		if sid, ok := realitySettings["short_id"].(string); ok {
+		if sid, ok := realitySettings["short_id"].(string); ok && sid != "" {
 			shortID = sid
 		}
 		if hs, ok := realitySettings["handshake"].(map[string]interface{}); ok {
-			if s, ok := hs["server"].(string); ok {
+			if s, ok := hs["server"].(string); ok && s != "" {
 				handshakeServer = s
 			}
 			if p, ok := hs["server_port"].(float64); ok {
