@@ -294,8 +294,7 @@ func baseConfig(nodeConfig NodeConfig) SingboxConfig {
 			},
 			Experimental: experimentalConfig{
 				CacheFile: cacheFileConfig{
-					Enabled: true,
-					Path:    "cache.db",
+					Enabled: false,
 				},
 				ClashAPI: clashAPIConfig{
 					ExternalController: fmt.Sprintf("127.0.0.1:%d", statsPort),
