@@ -378,6 +378,7 @@ func AgentGetConfig(c *gin.Context) {
 
 	// Parse network_settings for protocol-specific parameters
 	netSettings := parseJSONObject(node.NetworkSettings)
+	configJSONMap := parseJSONObject(node.ConfigJSON)
 
 	// Determine TLS mode
 	tls := 0
@@ -402,15 +403,30 @@ func AgentGetConfig(c *gin.Context) {
 		network = "tcp"
 	}
 
-	// Extract protocol-specific fields from network_settings
+	// Extract protocol-specific fields from network_settings (with config_json fallback)
 	serverName := getStringField(netSettings, "server_name", "tls_server_name", "reality_server_name")
+	if serverName == "" {
+		serverName = getStringField(configJSONMap, "server_name", "handshake_server")
+	}
 	upMbps := getIntField(netSettings, "bandwidth_up", "up_mbps")
+	if upMbps == 0 {
+		upMbps = getIntField(configJSONMap, "up_mbps")
+	}
 	downMbps := getIntField(netSettings, "bandwidth_down", "down_mbps")
+	if downMbps == 0 {
+		downMbps = getIntField(configJSONMap, "down_mbps")
+	}
 	obfsPassword := getStringField(netSettings, "obfs_password", "obfs-password")
+	if obfsPassword == "" {
+		obfsPassword = getStringField(configJSONMap, "obfs_password")
+	}
 	congestionControl := getStringField(netSettings, "congestion_control")
+	if congestionControl == "" {
+		congestionControl = getStringField(configJSONMap, "congestion_control")
+	}
 
-	// Extract TLS settings from network_settings
-	tlsSettings := extractTLSSettings(netSettings, node.Security, node.FlowControl)
+	// Extract TLS settings from network_settings with config_json fallback
+	tlsSettings := extractTLSSettings(netSettings, node.Security, node.FlowControl, configJSONMap)
 
 	resp := nodeConfigResponse{
 		Protocol:          node.Protocol,
@@ -988,24 +1004,48 @@ func getIntField(m map[string]interface{}, keys ...string) int {
 }
 
 // extractTLSSettings builds the TLS settings map from network_settings and node fields.
-func extractTLSSettings(netSettings map[string]interface{}, security, flowControl string) map[string]interface{} {
+func extractTLSSettings(netSettings map[string]interface{}, security, flowControl string, configJSON ...map[string]interface{}) map[string]interface{} {
 	settings := make(map[string]interface{})
+
+	// Helper: get string from netSettings first, then fallback to configJSON
+	getWithFallback := func(keys ...string) string {
+		if v := getStringField(netSettings, keys...); v != "" {
+			return v
+		}
+		for _, cj := range configJSON {
+			if v := getStringField(cj, keys...); v != "" {
+				return v
+			}
+		}
+		return ""
+	}
+	getIntWithFallback := func(keys ...string) int {
+		if v := getIntField(netSettings, keys...); v > 0 {
+			return v
+		}
+		for _, cj := range configJSON {
+			if v := getIntField(cj, keys...); v > 0 {
+				return v
+			}
+		}
+		return 0
+	}
 
 	// Reality settings
 	if security == "reality" {
 		reality := make(map[string]interface{})
-		if pk := getStringField(netSettings, "reality_private_key"); pk != "" {
+		if pk := getWithFallback("reality_private_key", "private_key"); pk != "" {
 			reality["private_key"] = pk
 		}
-		if sid := getStringField(netSettings, "reality_short_id"); sid != "" {
+		if sid := getWithFallback("reality_short_id", "short_id"); sid != "" {
 			reality["short_id"] = sid
 		}
 
 		handshake := make(map[string]interface{})
-		if hs := getStringField(netSettings, "reality_server_name"); hs != "" {
+		if hs := getWithFallback("reality_server_name", "server_name", "handshake_server"); hs != "" {
 			handshake["server"] = hs
 		}
-		if hp := getIntField(netSettings, "reality_port"); hp > 0 {
+		if hp := getIntWithFallback("reality_port", "handshake_port"); hp > 0 {
 			handshake["server_port"] = hp
 		}
 		if len(handshake) > 0 {
@@ -1018,7 +1058,7 @@ func extractTLSSettings(netSettings map[string]interface{}, security, flowContro
 	}
 
 	// TLS server_name
-	if sn := getStringField(netSettings, "server_name", "tls_server_name"); sn != "" {
+	if sn := getWithFallback("server_name", "tls_server_name"); sn != "" {
 		settings["server_name"] = sn
 	}
 
