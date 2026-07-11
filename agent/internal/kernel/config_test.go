@@ -12,6 +12,7 @@ func makeNodeConfig(protocol string) NodeConfig {
 		ServerPort: 443,
 		StatsPort:  9090,
 		Network:    "tcp",
+		TLS:        1,
 		ServerName: "test.example.com",
 		TLSSettings: map[string]interface{}{
 			"reality": map[string]interface{}{
@@ -164,5 +165,27 @@ func TestGenerateSingboxConfig_Hysteria2NoObfs(t *testing.T) {
 	}
 	if strings.Contains(out, "obfs") {
 		t.Error("hysteria2 without obfs should not contain obfs in config")
+	}
+}
+
+func TestGenerateSingboxConfig_VLESS_None(t *testing.T) {
+	cfg := makeNodeConfig("vless")
+	cfg.TLS = 0
+	cfg.TLSSettings = nil
+	out, err := GenerateSingboxConfig(cfg, makeUsers())
+	if err != nil {
+		t.Fatalf("GenerateSingboxConfig VLESS none error: %v", err)
+	}
+	if strings.Contains(out, "reality") {
+		t.Error("security=none should not contain reality")
+	}
+	if strings.Contains(out, `"tls"`) {
+		// bare VLESS may still have no tls block; if present must not enable reality
+		if strings.Contains(out, `"enabled": true`) && strings.Contains(out, "private_key") {
+			t.Error("security=none should not enable reality TLS")
+		}
+	}
+	if !strings.Contains(out, "vless") {
+		t.Error("output should contain vless inbound")
 	}
 }

@@ -417,32 +417,37 @@ func routeOutbound(item RouteRule) string {
 	}
 }
 
-// VLESS + Reality structures
+// VLESS structures
 type vlessInbound struct {
-	Type       string      `json:"type"`
-	Tag        string      `json:"tag"`
-	Listen     string      `json:"listen"`
-	ListenPort int         `json:"listen_port"`
-	Users      []vlessUser `json:"users"`
-	TLS        vlessTLS    `json:"tls"`
+	Type       string       `json:"type"`
+	Tag        string       `json:"tag"`
+	Listen     string       `json:"listen"`
+	ListenPort int          `json:"listen_port"`
+	Users      []vlessUser  `json:"users"`
+	TLS        *vlessTLS    `json:"tls,omitempty"`
 }
 
 type vlessUser struct {
 	Name string `json:"name"`
 	UUID string `json:"uuid"`
+	Flow string `json:"flow,omitempty"`
 }
 
 type vlessTLS struct {
-	Enabled    bool         `json:"enabled"`
-	ServerName string       `json:"server_name"`
-	Reality    vlessReality `json:"reality"`
+	Enabled         bool          `json:"enabled"`
+	ServerName      string        `json:"server_name,omitempty"`
+	CertificatePath string        `json:"certificate_path,omitempty"`
+	KeyPath         string        `json:"key_path,omitempty"`
+	Certificate     []string      `json:"certificate,omitempty"`
+	Key             []string      `json:"key,omitempty"`
+	Reality         *vlessReality `json:"reality,omitempty"`
 }
 
 type vlessReality struct {
 	Enabled    bool             `json:"enabled"`
 	Handshake  realityHandshake `json:"handshake"`
 	PrivateKey string           `json:"private_key"`
-	ShortID    []string         `json:"short_id"`
+	ShortID    []string         `json:"short_id,omitempty"`
 }
 
 type realityHandshake struct {
@@ -460,7 +465,34 @@ func buildVLESSInbound(nodeConfig NodeConfig, users []User) (vlessInbound, error
 		netSettings = make(map[string]interface{})
 	}
 
-	// Extract Reality settings — handle nested {"reality": {...}}, flat tls_settings, and network_settings.
+	// Build users (optional flow for vision)
+	vUsers := make([]vlessUser, len(users))
+	for i, u := range users {
+		name := u.UUID
+		if len(name) > 8 {
+			name = name[:8]
+		}
+		vu := vlessUser{Name: name, UUID: u.UUID}
+		if nodeConfig.Flow != "" && nodeConfig.Flow != "none" {
+			vu.Flow = nodeConfig.Flow
+		}
+		vUsers[i] = vu
+	}
+
+	in := vlessInbound{
+		Type:       "vless",
+		Tag:        "vless-in",
+		Listen:     listenAddr(nodeConfig.ListenIP),
+		ListenPort: nodeConfig.ServerPort,
+		Users:      vUsers,
+	}
+
+	// security=none / tls=0: plain VLESS without TLS/Reality
+	if nodeConfig.TLS == 0 {
+		return in, nil
+	}
+
+	// TLS or Reality enabled
 	realitySettings, _ := tlsSettings["reality"].(map[string]interface{})
 	privateKey := firstNonEmptyString(
 		getMapString(realitySettings, "private_key"),
@@ -472,75 +504,83 @@ func buildVLESSInbound(nodeConfig NodeConfig, users []User) (vlessInbound, error
 		getMapString(tlsSettings, "short_id", "reality_short_id"),
 		getMapString(netSettings, "reality_short_id", "short_id"),
 	)
-	handshakeServer := firstNonEmptyString(
+	serverName := firstNonEmptyString(
 		nodeConfig.ServerName,
 		getMapString(tlsSettings, "server_name", "reality_server_name"),
 		getMapString(netSettings, "reality_server_name", "server_name"),
 	)
-	handshakePort := 443
-	if p := getMapInt(realitySettings, "server_port"); p > 0 {
-		handshakePort = p
-	}
-	if hs, ok := realitySettings["handshake"].(map[string]interface{}); ok {
-		if s := getMapString(hs, "server"); s != "" {
-			handshakeServer = s
+
+	// Prefer Reality only when private key is actually present
+	privateKey = normalizeRealityKey(privateKey)
+	if privateKey != "" || realitySettings != nil {
+		if privateKey == "" {
+			return vlessInbound{}, fmt.Errorf("security=reality but private_key is empty or invalid")
 		}
-		if p := getMapInt(hs, "server_port"); p > 0 {
+
+		handshakeServer := firstNonEmptyString(serverName,
+			getMapString(realitySettings, "server"),
+		)
+		handshakePort := 443
+		if p := getMapInt(realitySettings, "server_port"); p > 0 {
 			handshakePort = p
 		}
-	}
-	if p := getMapInt(tlsSettings, "handshake_port", "reality_port"); p > 0 {
-		handshakePort = p
-	}
-	if p := getMapInt(netSettings, "reality_port", "handshake_port"); p > 0 {
-		handshakePort = p
-	}
-
-	privateKey = normalizeRealityKey(privateKey)
-	if privateKey == "" {
-		return vlessInbound{}, fmt.Errorf("reality private_key is empty or invalid (check panel node Reality settings)")
-	}
-
-	// Build users
-	vUsers := make([]vlessUser, len(users))
-	for i, u := range users {
-		name := u.UUID
-		if len(name) > 8 {
-			name = name[:8]
+		if hs, ok := realitySettings["handshake"].(map[string]interface{}); ok {
+			if s := getMapString(hs, "server"); s != "" {
+				handshakeServer = s
+			}
+			if p := getMapInt(hs, "server_port"); p > 0 {
+				handshakePort = p
+			}
 		}
-		vUsers[i] = vlessUser{Name: name, UUID: u.UUID}
-	}
+		if p := getMapInt(tlsSettings, "handshake_port", "reality_port"); p > 0 {
+			handshakePort = p
+		}
+		if p := getMapInt(netSettings, "reality_port", "handshake_port"); p > 0 {
+			handshakePort = p
+		}
+		if handshakeServer == "" {
+			handshakeServer = "www.microsoft.com"
+		}
 
-	serverName := firstNonEmptyString(
-		nodeConfig.ServerName,
-		getMapString(tlsSettings, "server_name"),
-		handshakeServer,
-	)
+		reality := &vlessReality{
+			Enabled: true,
+			Handshake: realityHandshake{
+				Server:     handshakeServer,
+				ServerPort: handshakePort,
+			},
+			PrivateKey: privateKey,
+		}
+		if shortID != "" {
+			reality.ShortID = []string{shortID}
+		}
 
-	reality := vlessReality{
-		Enabled: true,
-		Handshake: realityHandshake{
-			Server:     handshakeServer,
-			ServerPort: handshakePort,
-		},
-		PrivateKey: privateKey,
-	}
-	if shortID != "" {
-		reality.ShortID = []string{shortID}
-	}
-
-	return vlessInbound{
-		Type:       "vless",
-		Tag:        "vless-reality",
-		Listen:     listenAddr(nodeConfig.ListenIP),
-		ListenPort: nodeConfig.ServerPort,
-		Users:      vUsers,
-		TLS: vlessTLS{
+		in.Tag = "vless-reality"
+		in.TLS = &vlessTLS{
 			Enabled:    true,
-			ServerName: serverName,
+			ServerName: firstNonEmptyString(serverName, handshakeServer),
 			Reality:    reality,
-		},
-	}, nil
+		}
+		return in, nil
+	}
+
+	// Regular TLS
+	tlsCfg := &vlessTLS{
+		Enabled:    true,
+		ServerName: serverName,
+	}
+	if nodeConfig.CertPEM != "" && nodeConfig.KeyPEM != "" {
+		tlsCfg.Certificate = []string{nodeConfig.CertPEM}
+		tlsCfg.Key = []string{nodeConfig.KeyPEM}
+	}
+	if certPath := getMapString(tlsSettings, "certificate_path", "cert_path"); certPath != "" {
+		tlsCfg.CertificatePath = certPath
+	}
+	if keyPath := getMapString(tlsSettings, "key_path"); keyPath != "" {
+		tlsCfg.KeyPath = keyPath
+	}
+	in.Tag = "vless-tls"
+	in.TLS = tlsCfg
+	return in, nil
 }
 
 func getMapString(m map[string]interface{}, keys ...string) string {
