@@ -97,6 +97,8 @@ command_args="-c ${AGENT_DIR}/agent.yaml"
 command_background="yes"
 directory="${AGENT_DIR}"
 pidfile="/run/nexus-agent.pid"
+output_log="${AGENT_DIR}/agent.log"
+error_log="${AGENT_DIR}/agent.err"
 depend() { need net; }
 EOF
     chmod +x /etc/init.d/nexus-agent

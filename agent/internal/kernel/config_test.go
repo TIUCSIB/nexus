@@ -46,8 +46,8 @@ func TestGenerateSingboxConfig_VLESS(t *testing.T) {
 	if !strings.Contains(out, "dns") {
 		t.Error("output should contain dns section")
 	}
-	if !strings.Contains(out, "dns-remote") {
-		t.Error("output should contain dns-remote server")
+	if !strings.Contains(out, "local") {
+		t.Error("output should contain local server")
 	}
 	if !strings.Contains(out, "direct") {
 		t.Error("output should contain direct outbound")

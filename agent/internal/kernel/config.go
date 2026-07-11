@@ -244,71 +244,58 @@ func GenerateSingboxConfig(nodeConfig NodeConfig, users []User) (string, error) 
 }
 
 func baseConfig(nodeConfig NodeConfig) SingboxConfig {
-			outbounds := []map[string]interface{}{
-				{"type": "direct", "tag": "direct"},
-				{"type": "block", "tag": "block"},
-			}
-			outbounds = append(outbounds, buildCustomOutbounds(nodeConfig.CustomOutbounds)...)
+	outbounds := []map[string]interface{}{
+		{"type": "direct", "tag": "direct"},
+		{"type": "block", "tag": "block"},
+	}
+	outbounds = append(outbounds, buildCustomOutbounds(nodeConfig.CustomOutbounds)...)
 
-			rules := []map[string]interface{}{
-				{"inbound": []string{"dns-in"}, "action": "hijack-dns"},
-			}
-			rules = append(rules, buildRouteRules(nodeConfig.Routes)...)
+	// Only route rules from panel; do not reference non-existent dns-in inbound.
+	rules := buildRouteRules(nodeConfig.Routes)
 
-		statsPort := nodeConfig.StatsPort
-		if statsPort == 0 {
-			statsPort = 9090
-		}
-
-		return SingboxConfig{
-			Log: logConfig{
-				Level:     "info",
-				Timestamp: true,
-			},
-			DNS: buildDNSConfig(),
-			Outbounds: outbounds,
-			Route: routeConfig{
-				Rules:                 rules,
-				Final:                 "direct",
-				DefaultDomainResolver: "dns-remote",
-			},
-			Experimental: experimentalConfig{
-				CacheFile: cacheFileConfig{
-					Enabled: false,
-				},
-				ClashAPI: clashAPIConfig{
-					ExternalController: fmt.Sprintf("127.0.0.1:%d", statsPort),
-				},
-			},
-		}
+	statsPort := nodeConfig.StatsPort
+	if statsPort == 0 {
+		statsPort = 9090
 	}
 
-	func buildDNSConfig() dnsConfig {
-	// Server-side node config: keep DNS simple and compatible with sing-box 1.12+.
-	// FakeIP is for client-side proxies and is not needed on inbound nodes.
+	return SingboxConfig{
+		Log: logConfig{
+			Level:     "info",
+			Timestamp: true,
+		},
+		DNS:       buildDNSConfig(),
+		Outbounds: outbounds,
+		Route: routeConfig{
+			Rules:                 rules,
+			Final:                 "direct",
+			DefaultDomainResolver: "local",
+		},
+		Experimental: experimentalConfig{
+			CacheFile: cacheFileConfig{
+				Enabled: false,
+			},
+			ClashAPI: clashAPIConfig{
+				ExternalController: fmt.Sprintf("127.0.0.1:%d", statsPort),
+			},
+		},
+	}
+}
+
+func buildDNSConfig() dnsConfig {
+	// Minimal DNS for server-side inbound nodes (sing-box 1.12+ compatible).
 	return dnsConfig{
 		Servers: []map[string]interface{}{
 			{
-				"type":   "https",
-				"tag":    "dns-remote",
-				"server": "1.1.1.1",
-				"detour": "direct",
-			},
-			{
-				"type":   "https",
-				"tag":    "dns-google",
-				"server": "8.8.8.8",
-				"path":   "/dns-query",
-				"detour": "direct",
+				"type": "local",
+				"tag":  "local",
 			},
 			{
 				"type":   "udp",
-				"tag":    "dns-local",
+				"tag":    "google",
 				"server": "8.8.8.8",
 			},
 		},
-		Final:            "dns-remote",
-		IndependentCache: true,
+		Final: "local",
 	}
 }
 

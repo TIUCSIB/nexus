@@ -889,7 +889,7 @@ func convertCustomOutbounds(in []httpclient.CustomOutbound) []kernel.CustomOutbo
 }
 
 // watchSingbox monitors the sing-box process and restarts it with exponential backoff
-// if it exits unexpectedly. Checks every 5 seconds.
+// if it exits unexpectedly or never started successfully.
 func watchSingbox(ctx context.Context, sbManager *proxy.SingboxManager, client *httpclient.Client, prefix string, nodeCfg config.NormalizedNode) {
 	var consecutiveFailures int
 	maxBackoff := 2 * time.Minute
@@ -898,6 +898,7 @@ func watchSingbox(ctx context.Context, sbManager *proxy.SingboxManager, client *
 	defer ticker.Stop()
 
 	wasRunning := false
+	lastStartAttempt := time.Time{}
 
 	for {
 		select {
@@ -906,67 +907,80 @@ func watchSingbox(ctx context.Context, sbManager *proxy.SingboxManager, client *
 		case <-ticker.C:
 			isRunning := sbManager.IsRunning()
 
-			// Detect transition from running to not-running (unexpected exit)
-			if wasRunning && !isRunning {
-				consecutiveFailures++
-				backoff := time.Duration(consecutiveFailures) * 10 * time.Second
-				if backoff > maxBackoff {
-					backoff = maxBackoff
+			// Unexpected exit, or never successfully running after initial attempt.
+			needRestart := (wasRunning && !isRunning) || (!isRunning && time.Since(lastStartAttempt) > 15*time.Second)
+			if !needRestart {
+				if isRunning && consecutiveFailures > 0 {
+					consecutiveFailures = 0
 				}
+				wasRunning = isRunning
+				continue
+			}
+
+			consecutiveFailures++
+			backoff := time.Duration(consecutiveFailures) * 5 * time.Second
+			if backoff > maxBackoff {
+				backoff = maxBackoff
+			}
+			if wasRunning {
 				log.Printf("%ssing-box exited unexpectedly (failure #%d), restarting in %v...", prefix, consecutiveFailures, backoff)
+			} else {
+				log.Printf("%ssing-box not running (attempt #%d), starting in %v...", prefix, consecutiveFailures, backoff)
+			}
 
-				select {
-				case <-ctx.Done():
-					return
-				case <-time.After(backoff):
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(backoff):
+			}
+
+			// Pull latest config before restarting
+			nodeConfig, users, err := pullConfigWithUsers(client, prefix)
+			if err != nil {
+				log.Printf("%sFailed to pull config for restart: %v", prefix, err)
+				wasRunning = false
+				lastStartAttempt = time.Now()
+				continue
+			}
+
+			if nodeConfig == nil {
+				log.Printf("%sConfig is empty, not restarting sing-box", prefix)
+				wasRunning = false
+				lastStartAttempt = time.Now()
+				continue
+			}
+
+			// Generate sing-box config from node parameters
+			lastStartAttempt = time.Now()
+			if nodeConfig.ConfigMode == "json" && nodeConfig.ConfigJSON != "" {
+				log.Printf("%sRestarting sing-box with raw config_json (json mode)...", prefix)
+				cleanedConfig := sanitizeSingboxConfig(nodeConfig.ConfigJSON)
+				if err := sbManager.Start(cleanedConfig); err != nil {
+					log.Printf("%sFailed to restart sing-box: %v", prefix, err)
+					wasRunning = false
+				} else {
+					log.Printf("%ssing-box restarted by watcher (json mode)", prefix)
+					wasRunning = true
+					consecutiveFailures = 0
 				}
-
-				// Pull latest config before restarting
-				nodeConfig, users, err := pullConfigWithUsers(client, prefix)
+			} else {
+				configJSON, err := kernel.GenerateSingboxConfig(nodeKernelConfig(nodeConfig, nodeCfg), users)
 				if err != nil {
-					log.Printf("%sFailed to pull config for restart: %v", prefix, err)
+					log.Printf("%sFailed to generate config: %v", prefix, err)
 					wasRunning = false
 					continue
 				}
+				configJSON = sanitizeSingboxConfig(configJSON)
 
-				if nodeConfig == nil {
-					log.Printf("%sConfig is empty, not restarting sing-box", prefix)
+				if err := sbManager.Start(configJSON); err != nil {
+					log.Printf("%sFailed to restart sing-box: %v", prefix, err)
 					wasRunning = false
-					continue
+				} else {
+					log.Printf("%ssing-box restarted by watcher (attempt #%d)", prefix, consecutiveFailures)
+					wasRunning = true
+					consecutiveFailures = 0
 				}
-
-// Generate sing-box config from node parameters
-					if nodeConfig.ConfigMode == "json" && nodeConfig.ConfigJSON != "" {
-						log.Printf("%sRestarting sing-box with raw config_json (json mode)...", prefix)
-						cleanedConfig := sanitizeSingboxConfig(nodeConfig.ConfigJSON)
-						if err := sbManager.Start(cleanedConfig); err != nil {
-							log.Printf("%sFailed to restart sing-box: %v", prefix, err)
-						} else {
-							log.Printf("%ssing-box restarted by watcher (json mode)", prefix)
-						}
-					} else {
-						configJSON, err := kernel.GenerateSingboxConfig(nodeKernelConfig(nodeConfig, nodeCfg), users)
-						if err != nil {
-							log.Printf("%sFailed to generate config: %v", prefix, err)
-							wasRunning = false
-							continue
-						}
-						configJSON = sanitizeSingboxConfig(configJSON)
-
-						if err := sbManager.Start(configJSON); err != nil {
-							log.Printf("%sFailed to restart sing-box: %v", prefix, err)
-						} else {
-							log.Printf("%ssing-box restarted by watcher (attempt #%d)", prefix, consecutiveFailures)
-						}
-					}
 			}
-
-			// If sing-box is running again, reset failure counter
-			if isRunning && consecutiveFailures > 0 {
-				consecutiveFailures = 0
-			}
-
-			wasRunning = isRunning
 		}
 	}
 }
