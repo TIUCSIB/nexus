@@ -239,12 +239,11 @@ func GenerateSingbox(nodes []model.Node, user model.User) ([]byte, error) {
 
 func buildSingboxVLESS(node model.Node, user model.User, p NodeParams) (json.RawMessage, error) {
 	ob := map[string]interface{}{
-		"type":           "vless",
-		"tag":            node.Name,
-		"server":         node.Address,
-		"server_port":    node.Port,
-		"uuid":           user.UUID,
-		"packet_encoding": "xudp",
+		"type":        "vless",
+		"tag":         node.Name,
+		"server":      node.Address,
+		"server_port": node.Port,
+		"uuid":        user.UUID,
 	}
 
 	// Flow
@@ -253,8 +252,18 @@ func buildSingboxVLESS(node model.Node, user model.User, p NodeParams) (json.Raw
 		ob["flow"] = flow
 	}
 
+	// UDP 包编码：plain TCP 无 TLS 时不强制 xudp，避免客户端误显示
+	security := strings.ToLower(strings.TrimSpace(node.Security))
+	if security == "" {
+		security = "none"
+	}
+	hasTLS := security == "tls" || security == "reality"
+	if hasTLS {
+		// Reality/TLS + VLESS 常用 xudp
+		ob["packet_encoding"] = "xudp"
+	}
+
 	// TLS 配置 — 仅当 security 为 tls 或 reality 时启用
-	hasTLS := node.Security == "tls" || node.Security == "reality"
 	if !hasTLS {
 		return json.Marshal(ob)
 	}
@@ -269,7 +278,7 @@ func buildSingboxVLESS(node model.Node, user model.User, p NodeParams) (json.Raw
 	if serverName != "" {
 		tlsConfig["server_name"] = serverName
 	}
-	if node.Security == "reality" && p.PublicKey != "" {
+	if security == "reality" && p.PublicKey != "" {
 		reality := map[string]interface{}{
 			"enabled":    true,
 			"public_key": p.PublicKey,

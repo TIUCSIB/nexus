@@ -158,11 +158,6 @@ func GenerateSurfboard(nodes []model.Node, user model.User) ([]byte, error) {
 // ==================== URI 构建 ====================
 
 func buildVlessURI(node model.Node, user model.User, p NodeParams) string {
-	sni := p.ServerName
-	if sni == "" {
-		sni = node.Address
-	}
-
 	// 流控
 	flow := node.FlowControl
 	if flow == "" {
@@ -176,21 +171,37 @@ func buildVlessURI(node model.Node, user model.User, p NodeParams) string {
 	}
 
 	q := url.Values{}
-	q.Set("flow", flow)
+	if flow != "" && flow != "none" {
+		q.Set("flow", flow)
+	}
 	q.Set("security", security)
-	q.Set("type", "tcp")
-	q.Set("fp", "chrome")
+	network := node.Transport
+	if network == "" {
+		network = "tcp"
+	}
+	q.Set("type", network)
 
-	if node.Security == "reality" && p.PublicKey != "" {
+	// security=none 时不写 sni/fp，避免客户端当成 TLS
+	if security == "reality" && p.PublicKey != "" {
 		q.Set("pbk", p.PublicKey)
 		if p.ShortID != "" {
 			q.Set("sid", p.ShortID)
 		}
-		if p.HandshakeHost != "" {
-			q.Set("sni", p.HandshakeHost)
+		sni := p.HandshakeHost
+		if sni == "" {
+			sni = p.ServerName
 		}
-	} else {
+		if sni != "" {
+			q.Set("sni", sni)
+		}
+		q.Set("fp", "chrome")
+	} else if security == "tls" {
+		sni := p.ServerName
+		if sni == "" {
+			sni = node.Address
+		}
 		q.Set("sni", sni)
+		q.Set("fp", "chrome")
 	}
 
 	return fmt.Sprintf("vless://%s@%s:%d?%s#%s",

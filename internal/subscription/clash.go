@@ -429,16 +429,17 @@ func buildClashVLESS(node model.Node, user model.User, p NodeParams) map[string]
 		"server":     node.Address,
 		"port":       node.Port,
 		"uuid":       user.UUID,
-		"alterId":    0,
-		"cipher":     "auto",
 		"udp":        true,
 		"encryption": "none",
 	}
 
-	// TLS — 仅当 security 为 tls 或 reality 时启用
-	hasTLS := node.Security == "tls" || node.Security == "reality"
-	if hasTLS {
-		proxy["tls"] = true
+	// 传输层：tcp 可不写 network；其它传输显式写出
+	network := strings.ToLower(strings.TrimSpace(node.Transport))
+	if network == "" {
+		network = "tcp"
+	}
+	if network != "tcp" {
+		proxy["network"] = network
 	}
 
 	// Flow — 仅当显式设置且不为 none 时添加
@@ -446,11 +447,17 @@ func buildClashVLESS(node model.Node, user model.User, p NodeParams) map[string]
 	if flow != "" && flow != "none" {
 		proxy["flow"] = flow
 	}
-	// 注意：不要设置 flow: null，某些 Clash 客户端会解析失败
 
-	// Transport
-	if node.Transport != "" && node.Transport != "tcp" {
-		proxy["network"] = node.Transport
+	// TLS / Reality — 严格跟随节点 security，none 时明确关闭 TLS
+	security := strings.ToLower(strings.TrimSpace(node.Security))
+	if security == "" {
+		security = "none"
+	}
+	hasTLS := security == "tls" || security == "reality"
+	proxy["tls"] = hasTLS
+	if !hasTLS {
+		// 无 TLS 时不要带 servername/指纹，避免客户端 UI 误显示 TLS
+		return proxy
 	}
 
 	// TLS servername（Reality 时为 handshake dest server）
@@ -463,7 +470,7 @@ func buildClashVLESS(node model.Node, user model.User, p NodeParams) map[string]
 	}
 
 	// Reality 配置
-	if node.Security == "reality" && p.PublicKey != "" {
+	if security == "reality" && p.PublicKey != "" {
 		realityOpts := map[string]interface{}{
 			"public-key": p.PublicKey,
 		}
@@ -471,10 +478,7 @@ func buildClashVLESS(node model.Node, user model.User, p NodeParams) map[string]
 			realityOpts["short-id"] = p.ShortID
 		}
 		if p.HandshakeHost != "" {
-			realityOpts["handshake"] = p.HandshakeHost
-			if p.HandshakePort > 0 {
-				realityOpts["handshake-port"] = p.HandshakePort
-			}
+			realityOpts["servername"] = p.HandshakeHost
 		}
 		proxy["reality-opts"] = realityOpts
 		proxy["client-fingerprint"] = "chrome"
