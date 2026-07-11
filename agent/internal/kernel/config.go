@@ -321,18 +321,14 @@ func baseConfig(nodeConfig NodeConfig) SingboxConfig {
 					Address: "fakeip",
 				},
 			},
-Rules: []dnsRule{
-			{
-				Server: "dns-remote",
+			Rules: []dnsRule{
+				{
+					Server: "dns-remote",
+				},
 			},
-		},
-			Final:           "dns-remote",
+			Final:            "dns-remote",
 			IndependentCache: true,
-			FakeIP: &fakeIPConfig{
-				Enabled:    true,
-				Inet4Range: "198.18.0.0/15",
-				Inet6Range: "fc00::/18",
-			},
+			// Removed legacy fakeip config - sing-box 1.12+ uses server-level fakeip
 		}
 	}
 
