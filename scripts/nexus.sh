@@ -120,8 +120,25 @@ update_panel() {
     local last_version=$(curl -Ls "https://api.github.com/repos/${github_repo}/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
     if [[ -n "${last_version}" ]]; then
         stop_service nexus 2>/dev/null
-        wget --no-check-certificate -q -O "${panel_dir}/nexus" "https://github.com/${github_repo}/releases/download/${last_version}/nexus-linux-${arch}"
+        echo -e "  Version: ${green}${last_version}${plain}"
+        wget --no-check-certificate -q --show-progress -O "${panel_dir}/nexus" \
+            "https://github.com/${github_repo}/releases/download/${last_version}/nexus-linux-${arch}"
         chmod +x "${panel_dir}/nexus"
+        # 同步更新前端静态资源（节点配置修复等依赖前端）
+        local tmp_web="/tmp/nexus-web-dist.zip"
+        if wget --no-check-certificate -q --show-progress -O "${tmp_web}" \
+            "https://github.com/${github_repo}/releases/download/${last_version}/web-dist.zip"; then
+            mkdir -p "${panel_dir}/web/dist"
+            if command -v unzip &>/dev/null; then
+                unzip -o "${tmp_web}" -d "${panel_dir}/web/dist" >/dev/null 2>&1 || true
+            else
+                python3 -c "import zipfile; zipfile.ZipFile('${tmp_web}').extractall('${panel_dir}/web/dist')" 2>/dev/null || true
+            fi
+            rm -f "${tmp_web}"
+            echo -e "  Web: ${green}updated${plain}"
+        else
+            echo -e "  Web: ${yellow}skipped (web-dist.zip not found)${plain}"
+        fi
         start_service nexus 2>/dev/null
         echo -e "${green}Panel updated to ${last_version}${plain}"
     else
