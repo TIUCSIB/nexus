@@ -15,7 +15,7 @@ func makeNodeConfig(protocol string) NodeConfig {
 		ServerName: "test.example.com",
 		TLSSettings: map[string]interface{}{
 			"reality": map[string]interface{}{
-				"private_key": "test-private-key",
+				"private_key": "cAaWAHKAOQwFkSKUmDlyhKHyzj2DIAsfqUr-OZ3v8Gs",
 				"short_id":    "1234",
 				"handshake": map[string]interface{}{
 					"server":      "hs.example.com",

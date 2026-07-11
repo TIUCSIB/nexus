@@ -1,6 +1,7 @@
 package kernel
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -454,41 +455,50 @@ func buildVLESSInbound(nodeConfig NodeConfig, users []User) (vlessInbound, error
 	if tlsSettings == nil {
 		tlsSettings = make(map[string]interface{})
 	}
+	netSettings := nodeConfig.NetworkSettings
+	if netSettings == nil {
+		netSettings = make(map[string]interface{})
+	}
 
-	// Extract Reality settings — handle both nested {"reality": {...}} and flat format
+	// Extract Reality settings — handle nested {"reality": {...}}, flat tls_settings, and network_settings.
 	realitySettings, _ := tlsSettings["reality"].(map[string]interface{})
-	privateKey := ""
-	shortID := ""
-	handshakeServer := nodeConfig.ServerName
+	privateKey := firstNonEmptyString(
+		getMapString(realitySettings, "private_key"),
+		getMapString(tlsSettings, "private_key", "reality_private_key"),
+		getMapString(netSettings, "reality_private_key", "private_key"),
+	)
+	shortID := firstNonEmptyString(
+		getMapString(realitySettings, "short_id"),
+		getMapString(tlsSettings, "short_id", "reality_short_id"),
+		getMapString(netSettings, "reality_short_id", "short_id"),
+	)
+	handshakeServer := firstNonEmptyString(
+		nodeConfig.ServerName,
+		getMapString(tlsSettings, "server_name", "reality_server_name"),
+		getMapString(netSettings, "reality_server_name", "server_name"),
+	)
 	handshakePort := 443
+	if p := getMapInt(realitySettings, "server_port"); p > 0 {
+		handshakePort = p
+	}
+	if hs, ok := realitySettings["handshake"].(map[string]interface{}); ok {
+		if s := getMapString(hs, "server"); s != "" {
+			handshakeServer = s
+		}
+		if p := getMapInt(hs, "server_port"); p > 0 {
+			handshakePort = p
+		}
+	}
+	if p := getMapInt(tlsSettings, "handshake_port", "reality_port"); p > 0 {
+		handshakePort = p
+	}
+	if p := getMapInt(netSettings, "reality_port", "handshake_port"); p > 0 {
+		handshakePort = p
+	}
 
-	// Try flat format first (directly in tls_settings)
-	if pk, ok := tlsSettings["private_key"].(string); ok {
-		privateKey = pk
-	}
-	if sid, ok := tlsSettings["short_id"].(string); ok {
-		shortID = sid
-	}
-	if hs, ok := tlsSettings["server_name"].(string); ok && hs != "" {
-		handshakeServer = hs
-	}
-
-	// Override with nested reality format if present
-	if realitySettings != nil {
-		if pk, ok := realitySettings["private_key"].(string); ok && pk != "" {
-			privateKey = pk
-		}
-		if sid, ok := realitySettings["short_id"].(string); ok && sid != "" {
-			shortID = sid
-		}
-		if hs, ok := realitySettings["handshake"].(map[string]interface{}); ok {
-			if s, ok := hs["server"].(string); ok && s != "" {
-				handshakeServer = s
-			}
-			if p, ok := hs["server_port"].(float64); ok {
-				handshakePort = int(p)
-			}
-		}
+	privateKey = normalizeRealityKey(privateKey)
+	if privateKey == "" {
+		return vlessInbound{}, fmt.Errorf("reality private_key is empty or invalid (check panel node Reality settings)")
 	}
 
 	// Build users
@@ -501,37 +511,107 @@ func buildVLESSInbound(nodeConfig NodeConfig, users []User) (vlessInbound, error
 		vUsers[i] = vlessUser{Name: name, UUID: u.UUID}
 	}
 
-	serverName := nodeConfig.ServerName
-	if serverName == "" {
-		if sn, ok := tlsSettings["server_name"].(string); ok {
-			serverName = sn
-		}
-	}
+	serverName := firstNonEmptyString(
+		nodeConfig.ServerName,
+		getMapString(tlsSettings, "server_name"),
+		handshakeServer,
+	)
 
 	reality := vlessReality{
-				Enabled: true,
-				Handshake: realityHandshake{
-					Server:     handshakeServer,
-					ServerPort: handshakePort,
-				},
-				PrivateKey: privateKey,
-			}
-			if shortID != "" {
-				reality.ShortID = []string{shortID}
-			}
+		Enabled: true,
+		Handshake: realityHandshake{
+			Server:     handshakeServer,
+			ServerPort: handshakePort,
+		},
+		PrivateKey: privateKey,
+	}
+	if shortID != "" {
+		reality.ShortID = []string{shortID}
+	}
 
-			return vlessInbound{
-				Type:       "vless",
-				Tag:        "vless-reality",
-				Listen:     listenAddr(nodeConfig.ListenIP),
-				ListenPort: nodeConfig.ServerPort,
-				Users:      vUsers,
-				TLS: vlessTLS{
-					Enabled:    true,
-					ServerName: serverName,
-					Reality:    reality,
-				},
-			}, nil
+	return vlessInbound{
+		Type:       "vless",
+		Tag:        "vless-reality",
+		Listen:     listenAddr(nodeConfig.ListenIP),
+		ListenPort: nodeConfig.ServerPort,
+		Users:      vUsers,
+		TLS: vlessTLS{
+			Enabled:    true,
+			ServerName: serverName,
+			Reality:    reality,
+		},
+	}, nil
+}
+
+func getMapString(m map[string]interface{}, keys ...string) string {
+	if m == nil {
+		return ""
+	}
+	for _, key := range keys {
+		if v, ok := m[key]; ok {
+			switch val := v.(type) {
+			case string:
+				if strings.TrimSpace(val) != "" {
+					return strings.TrimSpace(val)
+				}
+			}
+		}
+	}
+	return ""
+}
+
+func getMapInt(m map[string]interface{}, keys ...string) int {
+	if m == nil {
+		return 0
+	}
+	for _, key := range keys {
+		if v, ok := m[key]; ok {
+			switch val := v.(type) {
+			case float64:
+				return int(val)
+			case int:
+				return val
+			case int64:
+				return int(val)
+			case string:
+				var n int
+				if _, err := fmt.Sscanf(val, "%d", &n); err == nil {
+					return n
+				}
+			}
+		}
+	}
+	return 0
+}
+
+func firstNonEmptyString(vals ...string) string {
+	for _, v := range vals {
+		if strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
+}
+
+// normalizeRealityKey accepts raw-url or std base64 private keys and returns raw-url form.
+func normalizeRealityKey(key string) string {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return ""
+	}
+	// Try RawURL first (sing-box default), then StdEncoding with/without padding.
+	decoders := []func(string) ([]byte, error){
+		func(s string) ([]byte, error) { return base64.RawURLEncoding.DecodeString(s) },
+		func(s string) ([]byte, error) { return base64.URLEncoding.DecodeString(s) },
+		func(s string) ([]byte, error) { return base64.RawStdEncoding.DecodeString(s) },
+		func(s string) ([]byte, error) { return base64.StdEncoding.DecodeString(s) },
+	}
+	for _, decode := range decoders {
+		if b, err := decode(key); err == nil && len(b) == 32 {
+			return base64.RawURLEncoding.EncodeToString(b)
+		}
+	}
+	return ""
 }
 
 // Hysteria2 structures

@@ -440,11 +440,17 @@ func buildDefaultConfigJSON(protocol string) string {
 }
 
 func AdminGenerateRealityKeys(c *gin.Context) {
+	// Match sing-box / Reality X25519 keypair generation:
+	// random 32 bytes + clamp, then derive public key.
 	var privateKey [32]byte
 	if _, err := crypto_rand.Read(privateKey[:]); err != nil {
 		InternalError(c, "生成密钥失败")
 		return
 	}
+	privateKey[0] &= 248
+	privateKey[31] &= 127
+	privateKey[31] |= 64
+
 	publicKey, err := curve25519.X25519(privateKey[:], curve25519.Basepoint)
 	if err != nil {
 		InternalError(c, fmt.Sprintf("生成公钥失败: %v", err))
