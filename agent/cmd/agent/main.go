@@ -290,6 +290,27 @@ func hotReloadOrRestart(sbManager *proxy.SingboxManager, nodeConfig *kernel.Node
 	return sbManager.Start(configJSON)
 }
 
+
+func userUUIDs(users []kernel.User) []string {
+	out := make([]string, 0, len(users))
+	for _, u := range users {
+		if u.UUID != "" {
+			out = append(out, u.UUID)
+		}
+	}
+	return out
+}
+
+func applyKnownUsers(statsCol *collector.StatsCollector, enforcer *devicelimit.Enforcer, users []kernel.User) {
+	uuids := userUUIDs(users)
+	if statsCol != nil {
+		statsCol.SetKnownUsers(uuids)
+	}
+	if enforcer != nil {
+		enforcer.SetKnownUsers(uuids)
+	}
+}
+
 // runNode manages the full lifecycle of a single proxy node.
 func runNode(ctx context.Context, nodeCfg config.NormalizedNode) {
 	prefix := fmt.Sprintf("[node:%d] ", nodeCfg.NodeID)
@@ -558,6 +579,10 @@ wsClient.RegisterHandler("reload", func(cmd wsclient.Command) error {
 	pendingTraffic := make(map[string][2]int64) // buffered traffic from failed reports
 	var lastNodeConfig *kernel.NodeConfigFromPanel // cached config for WS push
 	var lastUsers []kernel.User                    // cached users for WS push
+	if users != nil {
+		lastUsers = users
+		applyKnownUsers(statsCol, deviceLimitEnforcer, users)
+	}
 
 	// Use handshake intervals if available
 	pushInterval := heartbeatInterval
@@ -625,14 +650,17 @@ wsClient.RegisterHandler("reload", func(cmd wsclient.Command) error {
 					if err := sbManager.Stop(); err != nil {
 						log.Printf("%sFailed to stop sing-box: %v", prefix, err)
 					}
-				} else {
-					if err := hotReloadOrRestart(sbManager, newNodeConfig, nodeCfg, newUsers, prefix); err != nil {
-						log.Printf("%sFailed to apply config: %v", prefix, err)
+} else {
+						if err := hotReloadOrRestart(sbManager, newNodeConfig, nodeCfg, newUsers, prefix); err != nil {
+							log.Printf("%sFailed to apply config: %v", prefix, err)
+						} else {
+							lastUsers = newUsers
+							applyKnownUsers(statsCol, deviceLimitEnforcer, newUsers)
+						}
 					}
 				}
-			}
 
-		case <-statsTicker.C:
+			case <-statsTicker.C:
 			if !sbManager.IsRunning() {
 				continue
 			}
@@ -719,22 +747,24 @@ wsClient.RegisterHandler("reload", func(cmd wsclient.Command) error {
 				log.Printf("%sDevice limits refreshed: %d users with limits", prefix, len(limits))
 			}
 
-		case update := <-wsUpdateCh:
-			// WS pushed config or users — apply via hot reload
-			if update.config != nil {
-				lastNodeConfig = update.config
-			}
-			if update.users != nil {
-				lastUsers = update.users
-			}
-			if lastNodeConfig != nil {
-				if err := hotReloadOrRestart(sbManager, lastNodeConfig, nodeCfg, lastUsers, prefix); err != nil {
-					log.Printf("%sWS sync apply failed: %v", prefix, err)
-				} else {
-					log.Printf("%sConfig applied from WS push", prefix)
+case update := <-wsUpdateCh:
+				// WS pushed config or users — apply via hot reload
+				if update.config != nil {
+					lastNodeConfig = update.config
+				}
+				if update.users != nil {
+					lastUsers = update.users
+					applyKnownUsers(statsCol, deviceLimitEnforcer, update.users)
+				}
+				if lastNodeConfig != nil {
+					if err := hotReloadOrRestart(sbManager, lastNodeConfig, nodeCfg, lastUsers, prefix); err != nil {
+						log.Printf("%sWS sync apply failed: %v", prefix, err)
+					} else {
+						log.Printf("%sConfig applied from WS push", prefix)
+						applyKnownUsers(statsCol, deviceLimitEnforcer, lastUsers)
+					}
 				}
 			}
-		}
 	}
 }
 

@@ -197,6 +197,7 @@ func (o *Orchestrator) runNode(ctx context.Context, nodeID int) {
 		log.Printf("%sFailed to start sing-box: %v", prefix, err)
 		return
 	}
+	applyKnownUsers(statsCol, deviceLimitEnforcer, users)
 
 	// Start crash recovery watcher
 	watchCtx, watchCancel := context.WithCancel(ctx)
@@ -268,6 +269,8 @@ func (o *Orchestrator) runNode(ctx context.Context, nodeID int) {
 					sbManager.Stop()
 				} else if err := hotReloadOrRestartNode(sbManager, newNodeConfig, cfg, newUsers, prefix); err != nil {
 					log.Printf("%sFailed to apply config: %v", prefix, err)
+				} else {
+					applyKnownUsers(statsCol, deviceLimitEnforcer, newUsers)
 				}
 			}
 
@@ -547,6 +550,27 @@ func extractNodeID(cmd wsclient.Command) int {
 		return int(id)
 	}
 	return 0
+}
+
+
+func userUUIDs(users []kernel.User) []string {
+	out := make([]string, 0, len(users))
+	for _, u := range users {
+		if u.UUID != "" {
+			out = append(out, u.UUID)
+		}
+	}
+	return out
+}
+
+func applyKnownUsers(statsCol *collector.StatsCollector, enforcer *devicelimit.Enforcer, users []kernel.User) {
+	uuids := userUUIDs(users)
+	if statsCol != nil {
+		statsCol.SetKnownUsers(uuids)
+	}
+	if enforcer != nil {
+		enforcer.SetKnownUsers(uuids)
+	}
 }
 
 // pullNodeConfig fetches node config and users, converting to kernel types.

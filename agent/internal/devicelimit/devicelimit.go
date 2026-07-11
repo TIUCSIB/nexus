@@ -7,39 +7,66 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
 
+type connectionMetadata struct {
+	SourceIP    string `json:"sourceIP"`
+	User        string `json:"user"`
+	InboundUser string `json:"inboundUser"`
+	UID         string `json:"uid"`
+	Type        string `json:"type"`
+}
+
 type singboxConnection struct {
-	ID            string `json:"id"`
-	User          string `json:"user"`
-	Upload        int64  `json:"upload"`
-	Download      int64  `json:"download"`
-	Start         string `json:"start"`
-	Network       string `json:"network"`
-	Type          string `json:"type"`
-	Source        string `json:"source"`
-	SourceIP      string `json:"sourceIP"`
-	Destination   string `json:"destination"`
-	DestinationIP string `json:"destinationIP"`
-	Inbound       string `json:"inbound"`
-	InboundUser   string `json:"inboundUser"`
-	Outbound      string `json:"outbound"`
+	ID            string              `json:"id"`
+	User          string              `json:"user"`
+	Upload        int64               `json:"upload"`
+	Download      int64               `json:"download"`
+	Start         string              `json:"start"`
+	Network       string              `json:"network"`
+	Type          string              `json:"type"`
+	Source        string              `json:"source"`
+	SourceIP      string              `json:"sourceIP"`
+	Destination   string              `json:"destination"`
+	DestinationIP string              `json:"destinationIP"`
+	Inbound       string              `json:"inbound"`
+	InboundUser   string              `json:"inboundUser"`
+	Outbound      string              `json:"outbound"`
+	Metadata      *connectionMetadata `json:"metadata"`
 }
 
 type singboxConnectionsResponse struct {
 	Connections []singboxConnection `json:"connections"`
 }
 
-func (c singboxConnection) userUUID() string {
+func (c singboxConnection) rawUser() string {
 	if c.InboundUser != "" {
 		return c.InboundUser
 	}
-	return c.User
+	if c.User != "" {
+		return c.User
+	}
+	if c.Metadata != nil {
+		if c.Metadata.InboundUser != "" {
+			return c.Metadata.InboundUser
+		}
+		if c.Metadata.User != "" {
+			return c.Metadata.User
+		}
+		if c.Metadata.UID != "" {
+			return c.Metadata.UID
+		}
+	}
+	return ""
 }
 
 func (c singboxConnection) sourceIP() string {
+	if c.Metadata != nil && c.Metadata.SourceIP != "" {
+		return c.Metadata.SourceIP
+	}
 	if c.SourceIP != "" {
 		return c.SourceIP
 	}
@@ -49,10 +76,26 @@ func (c singboxConnection) sourceIP() string {
 	return c.Source
 }
 
+func (c singboxConnection) isProxyInbound() bool {
+	typ := c.Type
+	if c.Metadata != nil && c.Metadata.Type != "" {
+		typ = c.Metadata.Type
+	}
+	typ = strings.ToLower(typ)
+	for _, p := range []string{"vless", "hysteria", "tuic", "trojan", "shadowsocks", "vmess", "anytls"} {
+		if strings.Contains(typ, p) {
+			return true
+		}
+	}
+	return false
+}
+
 type Enforcer struct {
 	statsURL       string
 	client         *http.Client
 	deviceLimits   map[string]int
+	knownUsers     []string
+	shortToUUID    map[string]string
 	mu             sync.RWMutex
 	recentlyClosed map[string]time.Time
 	closedEvents   uint64
@@ -60,9 +103,10 @@ type Enforcer struct {
 
 func New(statsURL string) *Enforcer {
 	return &Enforcer{
-		statsURL:       statsURL,
+		statsURL:       strings.TrimRight(statsURL, "/"),
 		client:         &http.Client{Timeout: 10 * time.Second},
 		deviceLimits:   make(map[string]int),
+		shortToUUID:    make(map[string]string),
 		recentlyClosed: make(map[string]time.Time),
 	}
 }
@@ -71,6 +115,47 @@ func (e *Enforcer) UpdateLimits(limits map[string]int) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.deviceLimits = limits
+}
+
+// SetKnownUsers helps resolve short names / single-user fallback when Clash omits user field.
+func (e *Enforcer) SetKnownUsers(uuids []string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.knownUsers = append([]string(nil), uuids...)
+	e.shortToUUID = make(map[string]string, len(uuids)*2)
+	for _, u := range uuids {
+		u = strings.TrimSpace(u)
+		if u == "" {
+			continue
+		}
+		e.shortToUUID[u] = u
+		e.shortToUUID[strings.ToLower(u)] = u
+		if len(u) >= 8 {
+			e.shortToUUID[u[:8]] = u
+			e.shortToUUID[strings.ToLower(u[:8])] = u
+		}
+		compact := strings.ReplaceAll(u, "-", "")
+		if len(compact) >= 8 {
+			e.shortToUUID[compact[:8]] = u
+		}
+	}
+}
+
+func (e *Enforcer) resolveUser(raw string, isProxy bool) string {
+	raw = strings.TrimSpace(raw)
+	if raw != "" {
+		if full, ok := e.shortToUUID[raw]; ok {
+			return full
+		}
+		if full, ok := e.shortToUUID[strings.ToLower(raw)]; ok {
+			return full
+		}
+		return raw
+	}
+	if isProxy && len(e.knownUsers) == 1 {
+		return e.knownUsers[0]
+	}
+	return ""
 }
 
 func (e *Enforcer) Enforce() (int, error) {
@@ -88,9 +173,15 @@ func (e *Enforcer) Enforce() (int, error) {
 		ips   map[string]bool
 	}
 
+	e.mu.RLock()
+	limits := e.deviceLimits
+	e.mu.RUnlock()
+
 	userMap := make(map[string]*userConns)
 	for _, conn := range conns {
-		uuid := conn.userUUID()
+		e.mu.RLock()
+		uuid := e.resolveUser(conn.rawUser(), conn.isProxyInbound())
+		e.mu.RUnlock()
 		sourceIP := conn.sourceIP()
 		if uuid == "" || sourceIP == "" {
 			continue
@@ -103,10 +194,6 @@ func (e *Enforcer) Enforce() (int, error) {
 	}
 
 	var closed int
-	e.mu.RLock()
-	limits := e.deviceLimits
-	e.mu.RUnlock()
-
 	for uuid, uc := range userMap {
 		limit, ok := limits[uuid]
 		if !ok || limit <= 0 {
@@ -130,8 +217,8 @@ func (e *Enforcer) Enforce() (int, error) {
 				log.Printf("[devicelimit] close conn %s for user %s failed: %v", conn.ID[:8], uuid[:8], err)
 				continue
 			}
-				closed++
-				log.Printf("[devicelimit] closed conn %s (user=%s, src=%s)", conn.ID[:8], uuid[:8], conn.sourceIP())
+			closed++
+			log.Printf("[devicelimit] closed conn %s (user=%s, src=%s)", conn.ID[:8], uuid[:8], conn.sourceIP())
 		}
 	}
 	if closed > 0 {

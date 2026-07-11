@@ -465,14 +465,10 @@ func buildVLESSInbound(nodeConfig NodeConfig, users []User) (vlessInbound, error
 		netSettings = make(map[string]interface{})
 	}
 
-	// Build users (optional flow for vision)
+	// Build users: use full UUID as name so Clash API / stats can attribute traffic
 	vUsers := make([]vlessUser, len(users))
 	for i, u := range users {
-		name := u.UUID
-		if len(name) > 8 {
-			name = name[:8]
-		}
-		vu := vlessUser{Name: name, UUID: u.UUID}
+		vu := vlessUser{Name: u.UUID, UUID: u.UUID}
 		if nodeConfig.Flow != "" && nodeConfig.Flow != "none" {
 			vu.Flow = nodeConfig.Flow
 		}
@@ -693,14 +689,14 @@ type obfsConfig struct {
 }
 
 func buildHysteria2Inbound(nodeConfig NodeConfig, users []User) (hysteria2Inbound, error) {
-	// Build users
+	// Build users: name uses full UUID (hy2 password remains compact hex)
 	hyUsers := make([]hysteria2User, len(users))
 	for i, u := range users {
 		pw := strings.ReplaceAll(u.UUID, "-", "")
 		if len(pw) > 32 {
 			pw = pw[:32]
 		}
-		hy := hysteria2User{Name: pw[:8], Password: pw}
+		hy := hysteria2User{Name: u.UUID, Password: pw}
 		if u.SpeedLimit > 0 {
 			hy.UpMbps = u.SpeedLimit
 			hy.DownMbps = u.SpeedLimit
@@ -764,15 +760,11 @@ type tuicTLS struct {
 }
 
 func buildTUICInbound(nodeConfig NodeConfig, users []User) (tuicInbound, error) {
-	// Build users
+	// Build users: name = full UUID for consistent attribution
 	tUsers := make([]tuicUser, len(users))
 	for i, u := range users {
-		name := u.UUID
-		if len(name) > 8 {
-			name = name[:8]
-		}
 		tUsers[i] = tuicUser{
-			Name:     name,
+			Name:     u.UUID,
 			UUID:     u.UUID,
 			Password: u.UUID,
 		}
