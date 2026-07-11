@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -76,21 +77,42 @@ func main() {
 	log.Printf("Nexus Agent starting...")
 
 	// Load configuration from YAML
+	// Accept: -c path | -config path | --config path | bare path
 	cfgPath := "config.yml"
 	if len(os.Args) > 1 {
-		if os.Args[1] == "-c" && len(os.Args) > 2 {
+		arg := os.Args[1]
+		switch {
+		case (arg == "-c" || arg == "-config" || arg == "--config") && len(os.Args) > 2:
 			cfgPath = os.Args[2]
-		} else if os.Args[1] == "-v" {
+		case arg == "-v" || arg == "--version":
 			fmt.Printf("nexus-agent dev\n")
 			os.Exit(0)
-		} else if !strings.HasPrefix(os.Args[1], "-") {
-			cfgPath = os.Args[1]
+		case !strings.HasPrefix(arg, "-"):
+			cfgPath = arg
+		default:
+			// Unknown flag style: try next arg as path if present
+			if len(os.Args) > 2 && !strings.HasPrefix(os.Args[2], "-") {
+				cfgPath = os.Args[2]
+			}
 		}
+	}
+
+	// Resolve config path to absolute so relative working_dir is correct under any CWD.
+	if absCfg, err := filepath.Abs(cfgPath); err == nil {
+		cfgPath = absCfg
 	}
 
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
-		log.Fatalf("Failed to load config: %v", err)
+		log.Fatalf("Failed to load config %s: %v", cfgPath, err)
+	}
+
+	// If working_dir is relative/empty, default it to the config file directory.
+	cfgDir := filepath.Dir(cfgPath)
+	if err := os.Chdir(cfgDir); err != nil {
+		log.Printf("Warning: failed to chdir to %s: %v", cfgDir, err)
+	} else {
+		log.Printf("Working directory: %s", cfgDir)
 	}
 
 	// Configure log level from config

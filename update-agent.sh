@@ -87,19 +87,39 @@ fi
 # 启动 Agent
 echo -e "${yellow}[7/8]${plain} 启动 Agent..."
 
-# 修复 OpenRC/systemd 工作目录，避免相对路径写配置失败
+# 修复 OpenRC/systemd 工作目录与参数，避免相对路径写配置失败
 if [[ -f /etc/init.d/nexus-agent ]]; then
-    if ! grep -q '^directory=' /etc/init.d/nexus-agent; then
-        sed -i "/^command_args=/a directory=\"${AGENT_DIR}\"" /etc/init.d/nexus-agent
-        echo -e "  已修复 OpenRC working directory"
-    fi
+    cat > /etc/init.d/nexus-agent << EOF
+#!/sbin/openrc-run
+name="nexus-agent"
+command="${AGENT_DIR}/nexus-agent"
+command_args="-c ${AGENT_DIR}/agent.yaml"
+command_background="yes"
+directory="${AGENT_DIR}"
+pidfile="/run/nexus-agent.pid"
+depend() { need net; }
+EOF
+    chmod +x /etc/init.d/nexus-agent
+    echo -e "  已修复 OpenRC 服务定义"
 fi
 if [[ -f /etc/systemd/system/nexus-agent.service ]]; then
-    if ! grep -q '^WorkingDirectory=' /etc/systemd/system/nexus-agent.service; then
-        sed -i "/^\[Service\]/a WorkingDirectory=${AGENT_DIR}" /etc/systemd/system/nexus-agent.service
-        systemctl daemon-reload 2>/dev/null || true
-        echo -e "  已修复 systemd WorkingDirectory"
-    fi
+    cat > /etc/systemd/system/nexus-agent.service << EOF
+[Unit]
+Description=Nexus Agent
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=${AGENT_DIR}
+ExecStart=${AGENT_DIR}/nexus-agent -c ${AGENT_DIR}/agent.yaml
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    systemctl daemon-reload 2>/dev/null || true
+    echo -e "  已修复 systemd 服务定义"
 fi
 
 # 确保 agent.yaml 中 working_dir 为绝对路径
@@ -113,7 +133,7 @@ if command -v rc-service &>/dev/null; then
 elif command -v systemctl &>/dev/null; then
     systemctl start nexus-agent
 else
-    nohup ${AGENT_BIN} -config ${AGENT_DIR}/agent.yaml > nexus-agent.log 2>&1 &
+    nohup ${AGENT_BIN} -c ${AGENT_DIR}/agent.yaml > nexus-agent.log 2>&1 &
     echo "  Agent PID: $!"
 fi
 
