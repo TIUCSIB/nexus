@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"gopkg.in/yaml.v3"
 )
@@ -241,6 +242,19 @@ func (c *Config) normalizeSingbox(s SingboxConfig) SingboxConfig {
 	}
 	if s.StatsURL == "" {
 		s.StatsURL = fmt.Sprintf("http://127.0.0.1:%d", s.StatsPort)
+	}
+	if s.ConfigPath == "" {
+		s.ConfigPath = "singbox.json"
+	}
+	if s.WorkingDir == "" {
+		s.WorkingDir = "."
+	}
+	// Resolve working_dir to absolute path so service managers without CWD still work.
+	if absWd, err := filepath.Abs(s.WorkingDir); err == nil {
+		s.WorkingDir = absWd
+	}
+	if s.BinaryPath == "" {
+		s.BinaryPath = "sing-box"
 	}
 	return s
 }

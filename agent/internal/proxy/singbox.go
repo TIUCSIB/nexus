@@ -38,10 +38,19 @@ func New(cfg config.SingboxConfig) *SingboxManager {
 // atomicWriteFile writes data to a temp file then renames to target path,
 // ensuring the write is atomic and won't produce a partially-written file.
 func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
-	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, "*.tmp")
+	// Always resolve to absolute path so rename works regardless of process CWD.
+	absPath, err := filepath.Abs(path)
 	if err != nil {
-		return fmt.Errorf("create temp file: %w", err)
+		return fmt.Errorf("resolve config path: %w", err)
+	}
+	dir := filepath.Dir(absPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("create config dir %s: %w", dir, err)
+	}
+
+	tmp, err := os.CreateTemp(dir, "singbox-*.tmp")
+	if err != nil {
+		return fmt.Errorf("create temp file in %s: %w", dir, err)
 	}
 	tmpPath := tmp.Name()
 
@@ -50,11 +59,18 @@ func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
 		os.Remove(tmpPath)
 		return fmt.Errorf("write temp file: %w", err)
 	}
-	tmp.Close()
-
-	if err := os.Rename(tmpPath, path); err != nil {
+	if err := tmp.Close(); err != nil {
 		os.Remove(tmpPath)
-		return fmt.Errorf("rename temp file: %w", err)
+		return fmt.Errorf("close temp file: %w", err)
+	}
+	if err := os.Chmod(tmpPath, perm); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("chmod temp file: %w", err)
+	}
+
+	if err := os.Rename(tmpPath, absPath); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("rename temp file %s -> %s: %w", tmpPath, absPath, err)
 	}
 	return nil
 }
@@ -62,8 +78,26 @@ func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
 // writeConfig writes the sing-box configuration to disk atomically and returns the resolved path.
 func (s *SingboxManager) writeConfig(configJSON string) (string, error) {
 	configPath := s.cfg.ConfigPath
+	if configPath == "" {
+		configPath = "singbox.json"
+	}
 	if !filepath.IsAbs(configPath) {
-		configPath = filepath.Join(s.cfg.WorkingDir, configPath)
+		wd := s.cfg.WorkingDir
+		if wd == "" {
+			wd = "."
+		}
+		absWd, err := filepath.Abs(wd)
+		if err != nil {
+			return "", fmt.Errorf("resolve working_dir: %w", err)
+		}
+		if err := os.MkdirAll(absWd, 0755); err != nil {
+			return "", fmt.Errorf("create working_dir %s: %w", absWd, err)
+		}
+		configPath = filepath.Join(absWd, configPath)
+	} else {
+		if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
+			return "", fmt.Errorf("create config dir: %w", err)
+		}
 	}
 	return configPath, atomicWriteFile(configPath, []byte(configJSON), 0644)
 }
@@ -85,17 +119,25 @@ func (s *SingboxManager) Start(configJSON string) error {
 	log.Printf("[singbox] config written to %s", configPath)
 
 // Build command
-		ctx, cancel := context.WithCancel(context.Background())
-		cmd := exec.CommandContext(ctx, s.cfg.BinaryPath, "run", "-c", configPath)
-		cmd.Dir = s.cfg.WorkingDir
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		cmd.Env = append(os.Environ(),
-			"ENABLE_DEPRECATED_LEGACY_DNS_FAKEIP_OPTIONS=true",
-			"ENABLE_DEPRECATED_LEGACY_DNS_SERVERS=true",
-			"ENABLE_DEPRECATED_OUTBOUND_DNS_RULE_ITEM=true",
-			"ENABLE_DEPRECATED_MISSING_DOMAIN_RESOLVER=true",
-		)
+	ctx, cancel := context.WithCancel(context.Background())
+	cmd := exec.CommandContext(ctx, s.cfg.BinaryPath, "run", "-c", configPath)
+	if s.cfg.WorkingDir != "" {
+		if absWd, err := filepath.Abs(s.cfg.WorkingDir); err == nil {
+			cmd.Dir = absWd
+		} else {
+			cmd.Dir = s.cfg.WorkingDir
+		}
+	} else {
+		cmd.Dir = filepath.Dir(configPath)
+	}
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Env = append(os.Environ(),
+		"ENABLE_DEPRECATED_LEGACY_DNS_FAKEIP_OPTIONS=true",
+		"ENABLE_DEPRECATED_LEGACY_DNS_SERVERS=true",
+		"ENABLE_DEPRECATED_OUTBOUND_DNS_RULE_ITEM=true",
+		"ENABLE_DEPRECATED_MISSING_DOMAIN_RESOLVER=true",
+	)
 
 	if err := cmd.Start(); err != nil {
 		cancel()

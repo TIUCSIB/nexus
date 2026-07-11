@@ -130,19 +130,22 @@ name="nexus-agent"
 command="${install_dir}/nexus-agent"
 command_args="-config ${install_dir}/agent.yaml"
 command_background="yes"
+directory="${install_dir}"
+pidfile="/run/nexus-agent.pid"
 depend() { need net; }
 SVCEOF
-    chmod +x /etc/init.d/nexus-agent
-    rc-update add nexus-agent default
-    service nexus-agent start 2>/dev/null
-else
-    cat << SVCEOF > /etc/systemd/system/nexus-agent.service
+        chmod +x /etc/init.d/nexus-agent
+        rc-update add nexus-agent default
+        service nexus-agent start 2>/dev/null
+    else
+        cat << SVCEOF > /etc/systemd/system/nexus-agent.service
 [Unit]
 Description=Nexus Agent (node ${node_id})
 After=network.target
 
 [Service]
 Type=simple
+WorkingDirectory=${install_dir}
 ExecStart=${install_dir}/nexus-agent -config ${install_dir}/agent.yaml
 Restart=always
 RestartSec=5
