@@ -357,8 +357,9 @@ const transportTemplates: Record<string, { label: string; json: string }[]> = {
 
 function openProtocolEdit() {
   try {
-    const raw = editing.value.network_settings || '{}'
-    const parsed = JSON.parse(raw)
+    // 优先展示当前表单中的 netSettings，避免只读到上次已保存的旧值
+    const current = buildNetSettingsString() || editing.value.network_settings || '{}'
+    const parsed = JSON.parse(current)
     protocolJson.value = JSON.stringify(parsed, null, 2)
   } catch {
     protocolJson.value = editing.value.network_settings || '{}'
@@ -372,8 +373,9 @@ function applyTransportTemplate(templateJson: string) {
 
 function saveProtocolEdit() {
   try {
-    JSON.parse(protocolJson.value)
-    editing.value.network_settings = protocolJson.value
+    const parsed = JSON.parse(protocolJson.value)
+    netSettings.value = { ...parsed }
+    editing.value.network_settings = buildNetSettingsString()
     protocolEditOpen.value = false
     toast.success('协议配置已更新')
   } catch {
@@ -430,10 +432,36 @@ function parseNetSettings(raw: string | undefined): NetworkSettings {
 }
 
 function buildNetSettingsString(): string {
+  const src = { ...netSettings.value } as Record<string, any>
+  const security = editing.value.security || 'none'
+  const protocol = editing.value.protocol || ''
+
+  // 按当前协议/安全性剔除无关字段，避免残留 Reality/TLS 配置
+  if (protocol === 'vless') {
+    if (security !== 'reality') {
+      delete src.reality_port
+      delete src.reality_server_name
+      delete src.reality_private_key
+      delete src.reality_public_key
+      delete src.reality_short_id
+      delete src.utls_enabled
+    }
+    if (security === 'none') {
+      delete src.server_name
+      delete src.allow_insecure
+    }
+    if (security === 'reality') {
+      // Reality 使用 reality_server_name，不保留普通 TLS server_name
+      delete src.server_name
+    }
+  }
+
   const clean: Record<string, any> = {}
-  for (const [k, v] of Object.entries(netSettings.value)) {
+  for (const [k, v] of Object.entries(src)) {
     if (v !== undefined && v !== null && v !== '') clean[k] = v
   }
+  // 同步回表单，避免界面仍显示已剔除字段
+  netSettings.value = { ...clean }
   return Object.keys(clean).length ? JSON.stringify(clean) : ''
 }
 
@@ -444,6 +472,26 @@ const settingsStore = useSettingsStore()
 watch(() => editing.value.protocol, (proto) => {
   if (proto === 'vless' && editing.value.address && !netSettings.value.host) {
     netSettings.value.host = editing.value.address
+  }
+})
+
+// 切换到 Reality 时补默认握手端口；切离 Reality 时清理残留字段
+watch(() => editing.value.security, (sec) => {
+  if (sec === 'reality') {
+    if (!netSettings.value.reality_port) {
+      netSettings.value.reality_port = 443
+    }
+  } else if (editing.value.protocol === 'vless') {
+    delete netSettings.value.reality_port
+    delete netSettings.value.reality_server_name
+    delete netSettings.value.reality_private_key
+    delete netSettings.value.reality_public_key
+    delete netSettings.value.reality_short_id
+    delete netSettings.value.utls_enabled
+    if (sec === 'none') {
+      delete netSettings.value.server_name
+      delete netSettings.value.allow_insecure
+    }
   }
 })
 
@@ -553,7 +601,7 @@ function openCreate() {
     config_mode: 'auto', config_json: '', network_settings: '', status: 1,
     kernel_type: 'singbox', cert_config: '',
   }
-  netSettings.value = { host: '', reality_port: 443 }
+  netSettings.value = { host: '' }
   nodeBoundOutboundIds.value = []
   isEdit.value = false
   machineModeEnabled.value = false

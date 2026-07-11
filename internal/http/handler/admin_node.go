@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 
 	"nexus/internal/database"
@@ -101,12 +102,14 @@ func AdminCreateNode(c *gin.Context) {
 		status = *req.Status
 	}
 
-	// 如果是自动模式但没有 ConfigJSON，尝试从 Name/Protocol 信息构建一个默认的
+// 如果是自动模式但没有 ConfigJSON，尝试从 Name/Protocol 信息构建一个默认的
 	configJSON := req.ConfigJSON
 	if configMode == "auto" && configJSON == "" {
 		defaultParams := buildDefaultConfigJSON(req.Protocol)
 		configJSON = defaultParams
 	}
+
+	networkSettings := sanitizeNetworkSettings(req.NetworkSettings, security)
 
 	node := model.Node{
 		CustomID:        req.CustomID,
@@ -130,10 +133,10 @@ func AdminCreateNode(c *gin.Context) {
 		ConfigJSON:      configJSON,
 		CertConfig:      req.CertConfig,
 		KernelType:      defaultKernelType(req.KernelType),
-CustomOutbounds: req.CustomOutbounds,
-	NetworkSettings: req.NetworkSettings,
-	MachineID:       req.MachineID,
-	RegisterToken:   uuid.New().String(),
+		CustomOutbounds: req.CustomOutbounds,
+		NetworkSettings: networkSettings,
+		MachineID:       req.MachineID,
+		RegisterToken:   uuid.New().String(),
 		Sort:            req.Sort,
 		Status:          status,
 	}
@@ -176,7 +179,7 @@ type updateNodeRequest struct {
 	CustomOutbounds *string  `json:"custom_outbounds"`
 		Sort            *int     `json:"sort"`
 		Status          *int     `json:"status"`
-		NetworkSettings string   `json:"network_settings"`
+NetworkSettings *string  `json:"network_settings"`
 		MachineID       *uint    `json:"machine_id"`
 	}
 
@@ -281,22 +284,27 @@ func AdminUpdateNode(c *gin.Context) {
 	if req.CustomOutbounds != nil {
 		updates["custom_outbounds"] = *req.CustomOutbounds
 	}
-	if req.NetworkSettings != "" {
-		updates["network_settings"] = req.NetworkSettings
+	// 使用指针：允许写入空字符串以清空 network_settings
+	if req.NetworkSettings != nil {
+		security := req.Security
+		if security == "" {
+			security = node.Security
+		}
+		updates["network_settings"] = sanitizeNetworkSettings(*req.NetworkSettings, security)
 	}
-if req.Sort != nil {
-			updates["sort"] = *req.Sort
+	if req.Sort != nil {
+		updates["sort"] = *req.Sort
+	}
+	if req.Status != nil {
+		updates["status"] = *req.Status
+	}
+	if req.MachineID != nil {
+		if *req.MachineID == 0 {
+			updates["machine_id"] = nil
+		} else {
+			updates["machine_id"] = *req.MachineID
 		}
-		if req.Status != nil {
-			updates["status"] = *req.Status
-		}
-		if req.MachineID != nil {
-			if *req.MachineID == 0 {
-				updates["machine_id"] = nil
-			} else {
-				updates["machine_id"] = *req.MachineID
-			}
-		}
+	}
 
 	if len(updates) == 0 {
 		BadRequest(c, "没有需要更新的字段")
@@ -310,7 +318,7 @@ if req.Sort != nil {
 		return
 	}
 
-database.DB.First(&node, id)
+	database.DB.First(&node, id)
 
 	// Notify connected agent to reload config
 	WSHub.SendCommand(fmt.Sprintf("node:%d", node.ID), &ws.Command{Type: "reload"})
@@ -386,32 +394,22 @@ func defaultKernelType(s string) string {
 }
 
 // buildDefaultConfigJSON 为指定协议生成默认的配置参数 JSON
+// 注意：不再预填 Reality 密钥/握手参数，避免 security=none 时残留假配置
 func buildDefaultConfigJSON(protocol string) string {
 	var params map[string]interface{}
 
 	switch protocol {
 	case "vless":
-		params = map[string]interface{}{
-			"server_name":      "",
-			"private_key":      "",
-			"public_key":       "",
-			"short_id":         "6ba85179e30d4fc2",
-			"handshake_server": "www.microsoft.com",
-			"handshake_port":   443,
-		}
+		params = map[string]interface{}{}
 	case "hysteria2", "hy2":
 		params = map[string]interface{}{
 			"up_mbps":       100,
 			"down_mbps":     500,
 			"obfs_password": "",
-			"cert_path":     "/etc/nexus/cert.pem",
-			"key_path":      "/etc/nexus/key.pem",
 		}
 	case "tuic":
 		params = map[string]interface{}{
 			"congestion_control": "cubic",
-			"cert_path":          "/etc/nexus/cert.pem",
-			"key_path":           "/etc/nexus/key.pem",
 		}
 	case "vmess":
 		params = map[string]interface{}{
@@ -435,6 +433,47 @@ func buildDefaultConfigJSON(protocol string) string {
 	b, err := json.Marshal(params)
 	if err != nil {
 		return "{}"
+	}
+	return string(b)
+}
+
+// sanitizeNetworkSettings 按 security 剔除无关的 Reality/TLS 字段
+func sanitizeNetworkSettings(raw, security string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	var m map[string]interface{}
+	if err := json.Unmarshal([]byte(raw), &m); err != nil || m == nil {
+		return raw
+	}
+	sec := strings.ToLower(strings.TrimSpace(security))
+	if sec == "" {
+		sec = "none"
+	}
+	if sec != "reality" {
+		delete(m, "reality_port")
+		delete(m, "reality_server_name")
+		delete(m, "reality_private_key")
+		delete(m, "reality_public_key")
+		delete(m, "reality_short_id")
+		delete(m, "utls_enabled")
+		delete(m, "private_key")
+		delete(m, "public_key")
+		delete(m, "short_id")
+		delete(m, "handshake_server")
+		delete(m, "handshake_port")
+	}
+	if sec == "none" {
+		delete(m, "server_name")
+		delete(m, "allow_insecure")
+	}
+	if len(m) == 0 {
+		return ""
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		return raw
 	}
 	return string(b)
 }
