@@ -154,31 +154,11 @@ type SingboxConfig struct {
 }
 
 type dnsConfig struct {
-	Servers         []dnsServer      `json:"servers"`
-	Rules           []dnsRule        `json:"rules"`
-	Final           string           `json:"final"`
-	Strategy        string           `json:"strategy,omitempty"`
-	FakeIP          *fakeIPConfig    `json:"fakeip,omitempty"`
-	IndependentCache bool            `json:"independent_cache"`
-}
-
-type dnsServer struct {
-	Tag     string `json:"tag"`
-	Address string `json:"address"`
-	Detour  string `json:"detour,omitempty"`
-}
-
-type dnsRule struct {
-	Outbound []string `json:"outbound,omitempty"`
-	Server   string   `json:"server"`
-	Inbound  []string `json:"inbound,omitempty"`
-	Rule     string   `json:"rule,omitempty"`
-}
-
-type fakeIPConfig struct {
-	Enabled    bool   `json:"enabled"`
-	Inet4Range string `json:"inet4_range"`
-	Inet6Range string `json:"inet6_range"`
+	Servers          []map[string]interface{} `json:"servers"`
+	Rules            []map[string]interface{} `json:"rules,omitempty"`
+	Final            string                   `json:"final,omitempty"`
+	Strategy         string                   `json:"strategy,omitempty"`
+	IndependentCache bool                     `json:"independent_cache,omitempty"`
 }
 
 type logConfig struct {
@@ -304,33 +284,33 @@ func baseConfig(nodeConfig NodeConfig) SingboxConfig {
 	}
 
 	func buildDNSConfig() dnsConfig {
-		return dnsConfig{
-			Servers: []dnsServer{
-				{
-					Tag:     "dns-remote",
-					Address: "https://1.1.1.1/dns-query",
-					Detour:  "direct",
-				},
-				{
-					Tag:     "dns-google",
-					Address: "https://dns.google/dns-query",
-					Detour:  "direct",
-				},
-				{
-					Tag:     "dns-fakeip",
-					Address: "fakeip",
-				},
+	// Server-side node config: keep DNS simple and compatible with sing-box 1.12+.
+	// FakeIP is for client-side proxies and is not needed on inbound nodes.
+	return dnsConfig{
+		Servers: []map[string]interface{}{
+			{
+				"type":   "https",
+				"tag":    "dns-remote",
+				"server": "1.1.1.1",
+				"detour": "direct",
 			},
-			Rules: []dnsRule{
-				{
-					Server: "dns-remote",
-				},
+			{
+				"type":   "https",
+				"tag":    "dns-google",
+				"server": "8.8.8.8",
+				"path":   "/dns-query",
+				"detour": "direct",
 			},
-			Final:            "dns-remote",
-			IndependentCache: true,
-			// Removed legacy fakeip config - sing-box 1.12+ uses server-level fakeip
-		}
+			{
+				"type":   "udp",
+				"tag":    "dns-local",
+				"server": "8.8.8.8",
+			},
+		},
+		Final:            "dns-remote",
+		IndependentCache: true,
 	}
+}
 
 func buildCustomOutbounds(items []CustomOutbound) []map[string]interface{} {
 	out := make([]map[string]interface{}, 0, len(items))

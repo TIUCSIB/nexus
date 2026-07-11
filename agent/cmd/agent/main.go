@@ -40,36 +40,91 @@ const (
 	deviceLimitSyncInterval  = 60 * time.Second
 )
 
-// removeLegacyFakeIP removes the deprecated legacy fakeip field from sing-box config
-// to maintain compatibility with sing-box 1.12+
-func removeLegacyFakeIP(configJSON string) string {
+// sanitizeSingboxConfig cleans deprecated / invalid DNS fields for sing-box 1.12+.
+func sanitizeSingboxConfig(configJSON string) string {
 	var config map[string]interface{}
 	if err := json.Unmarshal([]byte(configJSON), &config); err != nil {
-		log.Printf("Warning: failed to parse config JSON for fakeip cleanup: %v", err)
+		log.Printf("Warning: failed to parse config JSON for cleanup: %v", err)
 		return configJSON
 	}
 
-	// Check if DNS config exists
+	changed := false
 	dns, ok := config["dns"].(map[string]interface{})
 	if !ok {
 		return configJSON
 	}
 
-	// Remove legacy fakeip field if it exists
+	// Remove legacy top-level fakeip block
 	if _, hasFakeIP := dns["fakeip"]; hasFakeIP {
 		delete(dns, "fakeip")
-		log.Printf("Removed legacy fakeip config for sing-box 1.12+ compatibility")
-		
-		// Re-marshal the cleaned config
-		cleanedBytes, err := json.MarshalIndent(config, "", "  ")
-		if err != nil {
-			log.Printf("Warning: failed to re-marshal cleaned config: %v", err)
-			return configJSON
-		}
-		return string(cleanedBytes)
+		changed = true
+		log.Printf("Removed legacy dns.fakeip for sing-box 1.12+ compatibility")
 	}
 
-	return configJSON
+	// Sanitize servers list
+	if servers, ok := dns["servers"].([]interface{}); ok {
+		newServers := make([]interface{}, 0, len(servers))
+		for _, raw := range servers {
+			server, ok := raw.(map[string]interface{})
+			if !ok {
+				newServers = append(newServers, raw)
+				continue
+			}
+
+			// Drop incomplete fakeip servers without ranges
+			addr, _ := server["address"].(string)
+			stype, _ := server["type"].(string)
+			if addr == "fakeip" || stype == "fakeip" {
+				inet4, _ := server["inet4_range"].(string)
+				inet6, _ := server["inet6_range"].(string)
+				if inet4 == "" && inet6 == "" {
+					changed = true
+					log.Printf("Removed incomplete fakeip DNS server from config")
+					continue
+				}
+			}
+
+			// Convert legacy {"address":"https://1.1.1.1/dns-query"} to new format
+			if addr != "" && stype == "" {
+				if strings.HasPrefix(addr, "https://") {
+					server["type"] = "https"
+					host := strings.TrimPrefix(addr, "https://")
+					host = strings.Split(host, "/")[0]
+					server["server"] = host
+					delete(server, "address")
+					changed = true
+				} else if strings.HasPrefix(addr, "tls://") {
+					server["type"] = "tls"
+					server["server"] = strings.TrimPrefix(addr, "tls://")
+					delete(server, "address")
+					changed = true
+				} else if addr == "local" {
+					server["type"] = "local"
+					delete(server, "address")
+					changed = true
+				}
+			}
+
+			newServers = append(newServers, server)
+		}
+		dns["servers"] = newServers
+	}
+
+	if !changed {
+		return configJSON
+	}
+
+	cleanedBytes, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		log.Printf("Warning: failed to re-marshal cleaned config: %v", err)
+		return configJSON
+	}
+	return string(cleanedBytes)
+}
+
+// removeLegacyFakeIP is kept for compatibility and now uses full sanitizer.
+func removeLegacyFakeIP(configJSON string) string {
+	return sanitizeSingboxConfig(configJSON)
 }
 
 func main() {
@@ -192,13 +247,14 @@ func nodeKernelConfig(panelCfg *kernel.NodeConfigFromPanel, localCfg config.Norm
 func startSingbox(sbManager *proxy.SingboxManager, nodeConfig *kernel.NodeConfigFromPanel, nodeCfg config.NormalizedNode, users []kernel.User, prefix string) error {
 	if nodeConfig.ConfigMode == "json" && nodeConfig.ConfigJSON != "" {
 		log.Printf("%sStarting sing-box with raw config_json (json mode)", prefix)
-		cleanedConfig := removeLegacyFakeIP(nodeConfig.ConfigJSON)
+		cleanedConfig := sanitizeSingboxConfig(nodeConfig.ConfigJSON)
 		return sbManager.Restart(cleanedConfig)
 	}
 	configJSON, err := kernel.GenerateSingboxConfig(nodeKernelConfig(nodeConfig, nodeCfg), users)
 	if err != nil {
 		return fmt.Errorf("generate config: %w", err)
 	}
+	configJSON = sanitizeSingboxConfig(configJSON)
 	log.Printf("%sStarting sing-box (protocol=%s, port=%d, %d users)", prefix, nodeConfig.Protocol, nodeConfig.ServerPort, len(users))
 	return sbManager.Restart(configJSON)
 }
@@ -209,13 +265,14 @@ func hotReloadOrRestart(sbManager *proxy.SingboxManager, nodeConfig *kernel.Node
 	// Generate config
 	var configJSON string
 	if nodeConfig.ConfigMode == "json" && nodeConfig.ConfigJSON != "" {
-		configJSON = removeLegacyFakeIP(nodeConfig.ConfigJSON)
+		configJSON = sanitizeSingboxConfig(nodeConfig.ConfigJSON)
 	} else {
 		var err error
 		configJSON, err = kernel.GenerateSingboxConfig(nodeKernelConfig(nodeConfig, nodeCfg), users)
 		if err != nil {
 			return fmt.Errorf("generate config: %w", err)
 		}
+		configJSON = sanitizeSingboxConfig(configJSON)
 	}
 
 	// Try hot reload if sing-box is running
@@ -261,10 +318,10 @@ if err != nil {
 			log.Printf("%sFailed to get initial config: %v", prefix, err)
 		} else if nodeConfig == nil {
 			log.Printf("%sPanel returned empty config, waiting for admin to configure...", prefix)
-		} else if nodeConfig.ConfigMode == "json" && nodeConfig.ConfigJSON != "" {
+} else if nodeConfig.ConfigMode == "json" && nodeConfig.ConfigJSON != "" {
 			// JSON mode: use the raw config_json directly
 			log.Printf("%sUsing raw config_json (json mode)", prefix)
-			cleanedConfig := removeLegacyFakeIP(nodeConfig.ConfigJSON)
+			cleanedConfig := sanitizeSingboxConfig(nodeConfig.ConfigJSON)
 			if err := sbManager.Start(cleanedConfig); err != nil {
 				log.Printf("%sFailed to start sing-box: %v", prefix, err)
 			} else {
@@ -276,6 +333,7 @@ if err != nil {
 			if err != nil {
 				log.Printf("%sFailed to generate sing-box config: %v", prefix, err)
 			} else {
+				configJSON = sanitizeSingboxConfig(configJSON)
 				log.Printf("%sConfig generated (protocol=%s, port=%d, %d users)",
 					prefix, nodeConfig.Protocol, nodeConfig.ServerPort, len(users))
 				if err := sbManager.Start(configJSON); err != nil {
@@ -284,7 +342,7 @@ if err != nil {
 					log.Printf("%ssing-box started successfully", prefix)
 				}
 			}
-}
+		}
 
 		// WS update channel: WS handlers send data here, main loop applies it
 		type wsUpdate struct {
@@ -880,7 +938,7 @@ func watchSingbox(ctx context.Context, sbManager *proxy.SingboxManager, client *
 // Generate sing-box config from node parameters
 					if nodeConfig.ConfigMode == "json" && nodeConfig.ConfigJSON != "" {
 						log.Printf("%sRestarting sing-box with raw config_json (json mode)...", prefix)
-						cleanedConfig := removeLegacyFakeIP(nodeConfig.ConfigJSON)
+						cleanedConfig := sanitizeSingboxConfig(nodeConfig.ConfigJSON)
 						if err := sbManager.Start(cleanedConfig); err != nil {
 							log.Printf("%sFailed to restart sing-box: %v", prefix, err)
 						} else {
@@ -893,6 +951,7 @@ func watchSingbox(ctx context.Context, sbManager *proxy.SingboxManager, client *
 							wasRunning = false
 							continue
 						}
+						configJSON = sanitizeSingboxConfig(configJSON)
 
 						if err := sbManager.Start(configJSON); err != nil {
 							log.Printf("%sFailed to restart sing-box: %v", prefix, err)

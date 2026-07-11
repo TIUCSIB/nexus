@@ -46,11 +46,11 @@ func TestGenerateSingboxConfig_VLESS(t *testing.T) {
 	if !strings.Contains(out, "dns") {
 		t.Error("output should contain dns section")
 	}
-	if !strings.Contains(out, "fakeip") {
-		t.Error("output should contain fakeip config")
+	if !strings.Contains(out, "dns-remote") {
+		t.Error("output should contain dns-remote server")
 	}
-	if !strings.Contains(out, "dns-out") {
-		t.Error("output should contain dns-out outbound")
+	if !strings.Contains(out, "direct") {
+		t.Error("output should contain direct outbound")
 	}
 }
 
@@ -108,7 +108,7 @@ func TestGenerateSingboxConfig_EmptyUsers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateSingboxConfig empty users error: %v", err)
 	}
-	if !strings.Contains(out, "dns-out") {
+	if !strings.Contains(out, "direct") {
 		t.Error("output should contain standard outbounds even with no users")
 	}
 }
