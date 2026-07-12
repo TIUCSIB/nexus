@@ -1,36 +1,55 @@
 # Binaries
-*.exe
-bin/
+nexus
 nexus-agent
-
-# Go sum files
-go.sum
-agent/go.sum
-
-# Node
-node_modules/
-web/dist/
-web/package-lock.json
-.git-alt/
-.gocache/
+*.exe
+/bin/
+/release-out/
 
 # Data
-data/
+/data/
 *.db
-
-# IDE
-.idea/
-.vscode/
-*.swp
+*.db-shm
+*.db-wal
 
 # Logs
 *.log
+*.out
+*.err
+nohup.out
 
-# Temp files
-*.tmp
-*.py
+# Dependencies
+/vendor/
+node_modules/
+
+# Build output
+/web/dist/
+/web/.vite/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
 
 # OS
 .DS_Store
 Thumbs.db
-nexus-install/
+
+# Temp
+*.tmp
+*.bak
+*.backup
+/tmp/
+
+# Config (keep examples)
+config.yaml
+agent.yaml
+!config.yaml.example
+!agent.yaml.example
+
+# Releases
+*.tar.gz
+*.zip
+nexus-linux-*
+nexus-agent-linux-*
+web-dist.zip

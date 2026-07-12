@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc && vite build",
+    "build:vps": "vue-tsc && vite build --mode production.vps",
+    "build:serverless": "vue-tsc && vite build --mode production.serverless",
     "preview": "vite preview"
   },
   "dependencies": {
