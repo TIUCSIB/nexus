@@ -4,6 +4,9 @@ import type { ApiResponse } from '@/types'
 export const getSettings = () =>
   request.get('/api/admin/settings') as Promise<ApiResponse>
 
+export const getSubscriptionTemplateDefaults = () =>
+  request.get('/api/admin/settings/subscription-template-defaults') as Promise<ApiResponse>
+
 export const updateSettings = (data: Record<string, string>) =>
   request.put('/api/admin/settings', { settings: data }) as Promise<ApiResponse>
 

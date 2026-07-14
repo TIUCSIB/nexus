@@ -231,11 +231,14 @@ func GetSubscription(c *gin.Context) {
 			links = append(links,
 				url+"/api/"+subSeg+"/singbox?token="+token,
 				url+"/api/"+subSeg+"/clash?token="+token,
+				url+"/api/"+subSeg+"/clashmeta?token="+token,
+				url+"/api/"+subSeg+"/stash?token="+token,
 				url+"/api/"+subSeg+"/surge?token="+token,
 				url+"/api/"+subSeg+"/surfboard?token="+token,
 				url+"/api/"+subSeg+"/shadowrocket?token="+token,
 				url+"/api/"+subSeg+"/v2rayn?token="+token,
 			)
+
 		}
 	}
 
