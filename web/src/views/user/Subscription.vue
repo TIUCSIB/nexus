@@ -18,12 +18,14 @@ const selectedFormat = ref('clash')
 const loadError = ref('')
 
 const formats = [
-  { value: 'clash', label: 'Clash / Clash.Meta', index: 1 },
+  { value: 'clash', label: 'Clash', index: 1 },
+  { value: 'clashmeta', label: 'Clash Meta', index: 2 },
   { value: 'singbox', label: 'sing-box', index: 0 },
-  { value: 'surge', label: 'Surge', index: 2 },
-  { value: 'surfboard', label: 'Surfboard', index: 3 },
-  { value: 'shadowrocket', label: 'Shadowrocket', index: 4 },
-  { value: 'v2rayn', label: 'V2RayN', index: 5 },
+  { value: 'stash', label: 'Stash', index: 3 },
+  { value: 'surge', label: 'Surge', index: 4 },
+  { value: 'surfboard', label: 'Surfboard', index: 5 },
+  { value: 'shadowrocket', label: 'Shadowrocket', index: 6 },
+  { value: 'v2rayn', label: 'V2RayN', index: 7 },
 ]
 
 const currentLink = computed(() => {
@@ -182,7 +184,7 @@ onMounted(async () => {
       </CardHeader>
       <CardContent class="space-y-4">
         <Tabs v-model="selectedFormat">
-          <TabsList class="grid w-full grid-cols-3 lg:grid-cols-6">
+          <TabsList class="grid w-full grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
             <TabsTrigger v-for="fmt in formats" :key="fmt.value" :value="fmt.value">
               {{ fmt.label }}
             </TabsTrigger>

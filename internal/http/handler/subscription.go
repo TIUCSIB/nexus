@@ -18,7 +18,8 @@ import (
 var subFormatMap = map[string]func(*gin.Context){
 	"singbox":      SubSingbox,
 	"clash":        SubClash,
-	"clashmeta":    SubClash,
+	"clashmeta":    SubClashMeta,
+	"stash":        SubStash,
 	"surge":        SubSurge,
 	"surfboard":    SubSurfboard,
 	"shadowrocket": SubShadowrocket,
@@ -81,11 +82,12 @@ func SubAutoDetect(c *gin.Context) {
 	ua := c.GetHeader("User-Agent")
 
 	switch {
+	case strings.Contains(ua, "Stash"):
+		SubStash(c)
 	case strings.Contains(ua, "ClashMeta") || strings.Contains(ua, "Mihomo") ||
-		strings.Contains(ua, "Stash") || strings.Contains(ua, "verge") ||
-		strings.Contains(ua, "flclash") || strings.Contains(ua, "nekobox") ||
-		strings.Contains(ua, "clashmeta"):
-		SubClash(c)
+		strings.Contains(ua, "verge") || strings.Contains(ua, "flclash") ||
+		strings.Contains(ua, "nekobox") || strings.Contains(ua, "clashmeta"):
+		SubClashMeta(c)
 	case strings.Contains(ua, "Clash") || strings.Contains(ua, "clash"):
 		SubClash(c)
 	case strings.Contains(ua, "Surge"):
@@ -237,6 +239,44 @@ func SubClash(c *gin.Context) {
 	nodes := setInfoNodes(getUserNodes(user), user)
 	appName := database.GetSettingDefault("app_name", "Proxy")
 	data, err := subscription.GenerateClash(nodes, *user, appName)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.Header("Content-Type", "text/yaml; charset=utf-8")
+	c.Data(http.StatusOK, "text/yaml; charset=utf-8", data)
+}
+
+func SubClashMeta(c *gin.Context) {
+	user, ok := lookupUserByToken(c)
+	if !ok {
+		return
+	}
+	setUserinfoHeader(c, user)
+
+	nodes := setInfoNodes(getUserNodes(user), user)
+	appName := database.GetSettingDefault("app_name", "Proxy")
+	data, err := subscription.GenerateClashMeta(nodes, *user, appName)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.Header("Content-Type", "text/yaml; charset=utf-8")
+	c.Data(http.StatusOK, "text/yaml; charset=utf-8", data)
+}
+
+func SubStash(c *gin.Context) {
+	user, ok := lookupUserByToken(c)
+	if !ok {
+		return
+	}
+	setUserinfoHeader(c, user)
+
+	nodes := setInfoNodes(getUserNodes(user), user)
+	appName := database.GetSettingDefault("app_name", "Proxy")
+	data, err := subscription.GenerateStash(nodes, *user, appName)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

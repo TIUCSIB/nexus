@@ -10,9 +10,10 @@ import { Separator } from '@/components/ui/separator'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { toast } from 'vue-sonner'
-import { getSettings, updateSettings } from '@/api/settings'
+import { getSettings, updateSettings, getSubscriptionTemplateDefaults } from '@/api/settings'
 import { getBackupInfo, downloadBackup } from '@/api/settings'
 import { getSystemStatus } from '@/api/systemStatus'
+import { builtinSubscriptionTemplateDefaults } from '@/constants/subscription-template-defaults'
 import { useSettingsStore } from '@/stores/settings'
 import { useRouter } from 'vue-router'
 import { AlertCircle, RefreshCw, Download, Database, Server, Clock, HardDrive, Globe, Activity } from 'lucide-vue-next'
@@ -22,17 +23,68 @@ const router = useRouter()
 
 const loading = ref(false)
 const originalSubPath = ref('s')
+const templateDefaults = ref<Record<string, string>>({ ...builtinSubscriptionTemplateDefaults })
 
 const site = ref({ app_name: 'Nexus', admin_path: 'admin', auth_path: 'auth', user_path: 'user', sub_url: '', app_description: '', force_https: false })
 const subscription = ref({
   sub_path: 's', sub_show_info: true, reset_traffic_method: '0',
   new_order_event_id: '', renew_order_event_id: '',
+  subscribe_template_singbox: '', subscribe_template_clash: '',
+  subscribe_template_clashmeta: '', subscribe_template_stash: '',
+  subscribe_template_surge: '', subscribe_template_surfboard: '',
 })
 const nodeConfig = ref({ server_token: '', device_limit_mode: '0', node_pull_interval: '60', node_push_interval: '60', websocket_enabled: false, websocket_url: '' })
 const backupInfo = ref<any>(null)
 const backupLoading = ref(false)
 const systemStatus = ref<any>(null)
 const sysLoading = ref(false)
+
+const templateSections = [
+  {
+    key: 'subscribe_template_singbox',
+    title: 'Sing-box 模板',
+    description: '全文 JSON 模板，系统会自动把生成的节点追加到 outbounds，并替换 proxy 组中的 $auto_outbounds。',
+    placeholder: '请输入 Sing-box 订阅模板',
+    tips: ['必须包含 outbounds 和 route 字段', '推荐保留 selector 组中的 $auto_outbounds 占位符'],
+  },
+  {
+    key: 'subscribe_template_clash',
+    title: 'Clash 模板',
+    description: '全文 YAML 模板，系统会自动注入 proxies，并把 proxy-groups 中的 $auto_proxy 替换为节点列表。',
+    placeholder: '请输入 Clash 订阅模板',
+    tips: ['必须包含 proxies、proxy-groups、rules', '支持 $app_name 占位符'],
+  },
+  {
+    key: 'subscribe_template_clashmeta',
+    title: 'Clash Meta 模板',
+    description: '全文 YAML 模板，生成方式与 Clash 相同，但使用独立模板内容，适合为 Mihomo / Clash Meta 单独调整。',
+    placeholder: '请输入 Clash Meta 订阅模板',
+    tips: ['必须包含 proxies、proxy-groups、rules', '支持 $app_name 占位符'],
+  },
+  {
+    key: 'subscribe_template_stash',
+    title: 'Stash 模板',
+    description: '全文 YAML 模板，自动注入节点和代理组，适合为 Stash 单独定制。',
+    placeholder: '请输入 Stash 订阅模板',
+    tips: ['必须包含 proxies、proxy-groups、rules', '支持 $app_name 占位符'],
+  },
+  {
+    key: 'subscribe_template_surge',
+    title: 'Surge 模板',
+    description: '全文文本模板，支持 $proxies、$proxy_group、$rules、$app_name 占位符。',
+    placeholder: '请输入 Surge 订阅模板',
+    tips: ['必须包含 $proxies、$proxy_group、$rules', '适合自定义 General、Rule、策略组布局'],
+  },
+  {
+    key: 'subscribe_template_surfboard',
+    title: 'Surfboard 模板',
+    description: '全文文本模板，支持 $proxies、$proxy_group、$rules、$app_name 占位符。',
+    placeholder: '请输入 Surfboard 订阅模板',
+    tips: ['必须包含 $proxies、$proxy_group、$rules', '默认与 Surge 类似，但可独立修改'],
+  },
+] as const
+
+type TemplateKey = typeof templateSections[number]['key']
 
 const subPathChanged = computed(() => {
   return subscription.value.sub_path !== originalSubPath.value
@@ -49,7 +101,6 @@ const subUrlPreview = computed(() => {
   const path = subscription.value.sub_path || 's'
   return `${base}/${path}/{token}`
 })
-
 
 const resetTrafficOptions = [
   { value: '0', label: '不重置' },
@@ -71,6 +122,45 @@ function generateToken() {
   nodeConfig.value.server_token = result
 }
 
+function applyTemplateDefaultsToForm() {
+  for (const section of templateSections) {
+    if (!subscription.value[section.key]) {
+      subscription.value[section.key] = templateDefaults.value[section.key] || ''
+    }
+  }
+}
+
+function syncTemplateDefaultsFromCurrentValues() {
+  for (const section of templateSections) {
+    const content = subscription.value[section.key]
+    if (content && !templateDefaults.value[section.key]) {
+      templateDefaults.value[section.key] = content
+    }
+  }
+}
+
+async function loadTemplateDefaults() {
+  try {
+    const res = await getSubscriptionTemplateDefaults()
+    if (res.code === 0 && res.data) {
+      templateDefaults.value = res.data
+      applyTemplateDefaultsToForm()
+    }
+  } catch {
+    syncTemplateDefaultsFromCurrentValues()
+  }
+}
+
+function resetTemplate(key: TemplateKey) {
+  const content = templateDefaults.value[key]
+  if (!content) {
+    toast.error('默认模板不存在')
+    return
+  }
+  subscription.value[key] = content
+  toast.success('已恢复默认模板，请记得保存设置')
+}
+
 async function fetchSettings() {
   try {
     const res = await getSettings()
@@ -78,8 +168,8 @@ async function fetchSettings() {
       const d = res.data
       if (d.app_name) site.value.app_name = d.app_name
       if (d.admin_path) site.value.admin_path = d.admin_path
-	      if (d.auth_path) site.value.auth_path = d.auth_path
-	      if (d.user_path) site.value.user_path = d.user_path
+      if (d.auth_path) site.value.auth_path = d.auth_path
+      if (d.user_path) site.value.user_path = d.user_path
       if (d.sub_url) site.value.sub_url = d.sub_url
       if (d.app_description) site.value.app_description = d.app_description
       if (d.force_https !== undefined) site.value.force_https = (d.force_https === 'true' || d.force_https === true || d.force_https === 1)
@@ -88,6 +178,14 @@ async function fetchSettings() {
       if (d.reset_traffic_method) subscription.value.reset_traffic_method = d.reset_traffic_method
       if (d.new_order_event_id) subscription.value.new_order_event_id = d.new_order_event_id
       if (d.renew_order_event_id) subscription.value.renew_order_event_id = d.renew_order_event_id
+      if (d.subscribe_template_singbox !== undefined) subscription.value.subscribe_template_singbox = d.subscribe_template_singbox
+      if (d.subscribe_template_clash !== undefined) subscription.value.subscribe_template_clash = d.subscribe_template_clash
+      if (d.subscribe_template_clashmeta !== undefined) subscription.value.subscribe_template_clashmeta = d.subscribe_template_clashmeta
+      if (d.subscribe_template_stash !== undefined) subscription.value.subscribe_template_stash = d.subscribe_template_stash
+      if (d.subscribe_template_surge !== undefined) subscription.value.subscribe_template_surge = d.subscribe_template_surge
+      if (d.subscribe_template_surfboard !== undefined) subscription.value.subscribe_template_surfboard = d.subscribe_template_surfboard
+      syncTemplateDefaultsFromCurrentValues()
+      applyTemplateDefaultsToForm()
       if (d.server_token) nodeConfig.value.server_token = d.server_token
       if (d.device_limit_mode) nodeConfig.value.device_limit_mode = d.device_limit_mode
       if (d.node_pull_interval) nodeConfig.value.node_pull_interval = d.node_pull_interval
@@ -96,7 +194,9 @@ async function fetchSettings() {
       if (d.websocket_url !== undefined) nodeConfig.value.websocket_url = d.websocket_url
       originalSubPath.value = d.sub_path || 's'
     }
-  } catch { toast.error('获取设置失败') }
+  } catch {
+    toast.error('获取设置失败')
+  }
 }
 
 async function handleSave(tab: string) {
@@ -104,15 +204,15 @@ async function handleSave(tab: string) {
   try {
     let data: Record<string, string> = {}
     if (tab === 'site') {
-data = {
-	        app_name: site.value.app_name,
-	        admin_path: site.value.admin_path,
-	        auth_path: site.value.auth_path,
-	        user_path: site.value.user_path,
-	        sub_url: site.value.sub_url,
-	        app_description: site.value.app_description,
-	        force_https: site.value.force_https ? 'true' : 'false',
-	      }
+      data = {
+        app_name: site.value.app_name,
+        admin_path: site.value.admin_path,
+        auth_path: site.value.auth_path,
+        user_path: site.value.user_path,
+        sub_url: site.value.sub_url,
+        app_description: site.value.app_description,
+        force_https: site.value.force_https ? 'true' : 'false',
+      }
     } else if (tab === 'subscription') {
       if (!subPathValid.value) {
         toast.error('订阅路径格式不正确，只允许字母、数字、下划线和短横线')
@@ -126,6 +226,15 @@ data = {
         new_order_event_id: subscription.value.new_order_event_id,
         renew_order_event_id: subscription.value.renew_order_event_id,
       }
+    } else if (tab === 'templates') {
+      data = {
+        subscribe_template_singbox: subscription.value.subscribe_template_singbox,
+        subscribe_template_clash: subscription.value.subscribe_template_clash,
+        subscribe_template_clashmeta: subscription.value.subscribe_template_clashmeta,
+        subscribe_template_stash: subscription.value.subscribe_template_stash,
+        subscribe_template_surge: subscription.value.subscribe_template_surge,
+        subscribe_template_surfboard: subscription.value.subscribe_template_surfboard,
+      }
     } else if (tab === 'node') {
       data = { server_token: nodeConfig.value.server_token, device_limit_mode: nodeConfig.value.device_limit_mode, node_pull_interval: nodeConfig.value.node_pull_interval, node_push_interval: nodeConfig.value.node_push_interval, websocket_enabled: nodeConfig.value.websocket_enabled ? 'true' : 'false', websocket_url: nodeConfig.value.websocket_url }
     }
@@ -136,8 +245,8 @@ data = {
         settingsStore.setAppName(site.value.app_name)
         settingsStore.setAppDescription(site.value.app_description)
         settingsStore.setAdminPath(site.value.admin_path)
-	        localStorage.setItem('auth_path', site.value.auth_path)
-	        localStorage.setItem('user_path', site.value.user_path)
+        localStorage.setItem('auth_path', site.value.auth_path)
+        localStorage.setItem('user_path', site.value.user_path)
         settingsStore.setSubUrl(site.value.sub_url)
         const newPath = '/' + site.value.admin_path + '/settings'
         if (router.currentRoute.value.path !== newPath) {
@@ -151,8 +260,11 @@ data = {
     } else {
       toast.error(res.message || '保存失败')
     }
-  } catch (e: any) { toast.error(e?.response?.data?.message || '保存失败') }
-  finally { loading.value = false }
+  } catch (e: any) {
+    toast.error(e?.response?.data?.message || '保存失败')
+  } finally {
+    loading.value = false
+  }
 }
 
 async function fetchBackupInfo() {
@@ -167,8 +279,11 @@ async function loadSystemStatus() {
   try {
     const res = await getSystemStatus()
     if (res.code === 0) systemStatus.value = res.data
-  } catch { toast.error('获取系统状态失败') }
-  finally { sysLoading.value = false }
+  } catch {
+    toast.error('获取系统状态失败')
+  } finally {
+    sysLoading.value = false
+  }
 }
 
 async function handleBackup() {
@@ -192,8 +307,15 @@ function formatBytes(bytes: number) {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
 }
 
-onMounted(() => { fetchSettings(); fetchBackupInfo(); loadSystemStatus() })
+onMounted(() => {
+  applyTemplateDefaultsToForm()
+  loadTemplateDefaults()
+  fetchSettings()
+  fetchBackupInfo()
+  loadSystemStatus()
+})
 </script>
+
 
 <template>
   <div class="space-y-6">
@@ -202,6 +324,7 @@ onMounted(() => { fetchSettings(); fetchBackupInfo(); loadSystemStatus() })
       <TabsList>
         <TabsTrigger value="site">站点设置</TabsTrigger>
         <TabsTrigger value="subscription">订阅设置</TabsTrigger>
+        <TabsTrigger value="templates">订阅模板</TabsTrigger>
         <TabsTrigger value="node">节点配置</TabsTrigger>
         <TabsTrigger value="system">系统状态</TabsTrigger>
       </TabsList>
@@ -266,7 +389,7 @@ onMounted(() => { fetchSettings(); fetchBackupInfo(); loadSystemStatus() })
         <Card>
           <CardHeader>
             <CardTitle>订阅设置</CardTitle>
-            <CardDescription>配置订阅和套餐相关选项</CardDescription>
+            <CardDescription>配置订阅路径、订阅信息展示和流量重置选项</CardDescription>
           </CardHeader>
           <CardContent class="space-y-4">
             <div class="grid gap-2">
@@ -311,6 +434,44 @@ onMounted(() => { fetchSettings(); fetchBackupInfo(); loadSystemStatus() })
             <div class="flex justify-end">
               <Button @click="handleSave('subscription')" :disabled="loading || !subPathValid">{{ loading ? '保存中...' :
                 '保存设置' }}</Button>
+            </div>
+          </CardContent>
+        </Card>
+      </TabsContent>
+
+      <TabsContent value="templates">
+        <Card>
+          <CardHeader>
+            <CardTitle>订阅模板</CardTitle>
+            <CardDescription>配置不同客户端订阅导入时生成的配置模板</CardDescription>
+          </CardHeader>
+          <CardContent class="space-y-4">
+            <Tabs default-value="subscribe_template_singbox" class="space-y-4">
+              <TabsList>
+                <TabsTrigger v-for="section in templateSections" :key="section.key" :value="section.key">
+                  {{ section.title.replace(' 模板', '') }}
+                </TabsTrigger>
+              </TabsList>
+              <TabsContent v-for="section in templateSections" :key="section.key" :value="section.key" class="space-y-4">
+                <div class="flex items-start justify-between gap-4">
+                  <div class="space-y-1">
+                    <Label>{{ section.title }}</Label>
+                    <p class="text-sm text-muted-foreground">{{ section.description }}</p>
+                  </div>
+                  <Button type="button" variant="outline" size="sm" @click="resetTemplate(section.key)">恢复默认模板</Button>
+                </div>
+                <Textarea
+                  v-model="subscription[section.key]"
+                  :placeholder="section.placeholder"
+                  class="h-[480px] resize-none overflow-y-auto font-mono text-xs leading-5"
+                />
+                <div class="text-xs text-muted-foreground space-y-1">
+                  <p v-for="tip in section.tips" :key="tip">{{ tip }}</p>
+                </div>
+              </TabsContent>
+            </Tabs>
+            <div class="flex justify-end">
+              <Button @click="handleSave('templates')" :disabled="loading">{{ loading ? '保存中...' : '保存模板' }}</Button>
             </div>
           </CardContent>
         </Card>

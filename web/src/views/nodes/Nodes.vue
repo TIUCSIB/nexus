@@ -524,6 +524,19 @@ function getGroupName(id: number | null | undefined) {
 	  }
 	}
 
+function getNodeProtocolBadgeClass(protocol: string | null | undefined): string {
+  switch ((protocol || '').toLowerCase()) {
+    case 'tuic':
+      return 'bg-emerald-100 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+    case 'hysteria2':
+      return 'bg-sky-100 text-sky-700 border-sky-200 hover:bg-sky-100'
+    case 'vless':
+      return 'bg-slate-900 text-white border-slate-900 hover:bg-slate-900'
+    default:
+      return 'bg-muted text-foreground border-border'
+  }
+}
+
 function getRouteName(id: number | null | undefined) {
   if (!id) return ''
   const r = routes.value.find(r => r.id === id)
@@ -757,8 +770,8 @@ onMounted(() => { fetchData(); fetchOptions() })
 	              </TableCell>
 	              <TableCell>
                 <div class="flex items-center gap-1">
-                  <Badge v-if="n.custom_id" variant="default" class="font-mono">{{ n.custom_id }}</Badge>
-                  <Badge v-else variant="outline" class="font-mono text-xs">ID:{{ n.id }}</Badge>
+                  <Badge v-if="n.custom_id" :class="getNodeProtocolBadgeClass(n.protocol)" class="font-mono border">{{ n.custom_id }}</Badge>
+                  <Badge v-else :class="getNodeProtocolBadgeClass(n.protocol)" class="font-mono text-xs border">ID:{{ n.id }}</Badge>
                 </div>
               </TableCell>
               <TableCell>

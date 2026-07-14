@@ -11,32 +11,32 @@ import (
 
 // clashConfig 是 Clash/Clash.Meta 配置文件的顶层结构。
 type clashConfig struct {
-	MixedPort         int              `yaml:"mixed-port"`
-	AllowLan          bool             `yaml:"allow-lan"`
-	BindAddress       string           `yaml:"bind-address,omitempty"`
-	Mode              string           `yaml:"mode"`
-	LogLevel          string           `yaml:"log-level"`
-	ExternalController string          `yaml:"external-controller,omitempty"`
-	UnifiedDelay      bool             `yaml:"unified-delay,omitempty"`
-	TCPConcurrent     bool             `yaml:"tcp-concurrent,omitempty"`
-	DNS               *clashDNS        `yaml:"dns,omitempty"`
-	Proxies           []interface{}    `yaml:"proxies"`
-	ProxyGroups       []clashGroup     `yaml:"proxy-groups"`
-	Rules             []string         `yaml:"rules"`
+	MixedPort          int           `yaml:"mixed-port"`
+	AllowLan           bool          `yaml:"allow-lan"`
+	BindAddress        string        `yaml:"bind-address,omitempty"`
+	Mode               string        `yaml:"mode"`
+	LogLevel           string        `yaml:"log-level"`
+	ExternalController string        `yaml:"external-controller,omitempty"`
+	UnifiedDelay       bool          `yaml:"unified-delay,omitempty"`
+	TCPConcurrent      bool          `yaml:"tcp-concurrent,omitempty"`
+	DNS                *clashDNS     `yaml:"dns,omitempty"`
+	Proxies            []interface{} `yaml:"proxies"`
+	ProxyGroups        []clashGroup  `yaml:"proxy-groups"`
+	Rules              []string      `yaml:"rules"`
 }
 
 type clashDNS struct {
-	Enable           bool              `yaml:"enable"`
-	IPv6             bool              `yaml:"ipv6"`
-	DefaultNameserver []string         `yaml:"default-nameserver"`
-	EnhancedMode     string            `yaml:"enhanced-mode"`
-	FakeIPRange      string            `yaml:"fake-ip-range"`
-	UseHosts         bool              `yaml:"use-hosts"`
-	NameserverPolicy map[string]string `yaml:"nameserver-policy,omitempty"`
-	Nameserver       []string          `yaml:"nameserver"`
-	Fallback         []string          `yaml:"fallback,omitempty"`
-	FallbackFilter   *clashFallbackFilter `yaml:"fallback-filter,omitempty"`
-	FakeIPFilter     []string          `yaml:"fake-ip-filter,omitempty"`
+	Enable            bool                 `yaml:"enable"`
+	IPv6              bool                 `yaml:"ipv6"`
+	DefaultNameserver []string             `yaml:"default-nameserver"`
+	EnhancedMode      string               `yaml:"enhanced-mode"`
+	FakeIPRange       string               `yaml:"fake-ip-range"`
+	UseHosts          bool                 `yaml:"use-hosts"`
+	NameserverPolicy  map[string]string    `yaml:"nameserver-policy,omitempty"`
+	Nameserver        []string             `yaml:"nameserver"`
+	Fallback          []string             `yaml:"fallback,omitempty"`
+	FallbackFilter    *clashFallbackFilter `yaml:"fallback-filter,omitempty"`
+	FakeIPFilter      []string             `yaml:"fake-ip-filter,omitempty"`
 }
 
 type clashFallbackFilter struct {
@@ -47,89 +47,37 @@ type clashFallbackFilter struct {
 }
 
 type clashGroup struct {
-	Name    string   `yaml:"name"`
-	Type    string   `yaml:"type"`
-	Proxies []string `yaml:"proxies"`
-	URL     string   `yaml:"url,omitempty"`
-	Interval int     `yaml:"interval,omitempty"`
-	Tolerance int    `yaml:"tolerance,omitempty"`
+	Name      string   `yaml:"name"`
+	Type      string   `yaml:"type"`
+	Proxies   []string `yaml:"proxies"`
+	URL       string   `yaml:"url,omitempty"`
+	Interval  int      `yaml:"interval,omitempty"`
+	Tolerance int      `yaml:"tolerance,omitempty"`
 }
 
 // GenerateClash 生成 Clash/Mihomo 格式的 YAML 配置（Xboard 风格）。
 func GenerateClash(nodes []model.Node, user model.User, appName string) ([]byte, error) {
-	cfg := clashConfig{
-		MixedPort:          7890,
-		AllowLan:           true,
-		BindAddress:        "*",
-		Mode:               "rule",
-		LogLevel:           "info",
-		ExternalController: "127.0.0.1:9090",
-		UnifiedDelay:       true,
-		TCPConcurrent:      true,
-		DNS: &clashDNS{
-			Enable:           true,
-			IPv6:             false,
-			DefaultNameserver: []string{"223.5.5.5", "119.29.29.29"},
-			EnhancedMode:     "fake-ip",
-			FakeIPRange:      "198.18.0.1/16",
-			UseHosts:         true,
-			NameserverPolicy: map[string]string{
-				"+.google.com":         "https://dns.cloudflare.com/dns-query",
-				"+.googleapis.com":     "https://dns.cloudflare.com/dns-query",
-				"+.googleapis.cn":      "https://dns.cloudflare.com/dns-query",
-				"+.googlevideo.com":    "https://dns.cloudflare.com/dns-query",
-				"+.gstatic.com":        "https://dns.cloudflare.com/dns-query",
-				"+.youtube.com":        "https://dns.cloudflare.com/dns-query",
-				"+.youtu.be":           "https://dns.cloudflare.com/dns-query",
-				"+.facebook.com":       "https://dns.cloudflare.com/dns-query",
-				"+.twitter.com":        "https://dns.cloudflare.com/dns-query",
-				"+.x.com":              "https://dns.cloudflare.com/dns-query",
-				"+.github.com":         "https://dns.cloudflare.com/dns-query",
-				"+.githubusercontent.com": "https://dns.cloudflare.com/dns-query",
-				"+.openai.com":         "https://dns.cloudflare.com/dns-query",
-				"+.chatgpt.com":        "https://dns.cloudflare.com/dns-query",
-				"+.anthropic.com":      "https://dns.cloudflare.com/dns-query",
-			},
-			Nameserver: []string{
-				"https://doh.pub/dns-query",
-				"https://dns.alidns.com/dns-query",
-				"tls://dot.pub:853",
-				"tls://dns.alidns.com:853",
-			},
-			Fallback: []string{
-				"https://dns.cloudflare.com/dns-query",
-				"https://dns.google/dns-query",
-				"tls://1.1.1.1:853",
-				"tls://8.8.8.8:853",
-			},
-			FallbackFilter: &clashFallbackFilter{
-				GeoIP:     true,
-				GeoIPCode: "CN",
-				IPCIDR: []string{
-					"0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10",
-					"127.0.0.0/8", "169.254.0.0/16", "172.16.0.0/12",
-					"192.168.0.0/16", "224.0.0.0/4", "240.0.0.0/4",
-				},
-				Domain: []string{
-					"+.google.com", "+.facebook.com", "+.youtube.com",
-					"+.githubusercontent.com", "+.googlevideo.com", "+.googleapis.cn",
-				},
-			},
-			FakeIPFilter: []string{
-				"*.lan", "*.local", "*.localhost", "*.test",
-				"localhost.ptlogin2.qq.com",
-				"+.stun.*.*", "+.stun.*.*.*", "+.stun.*.*.*.*",
-				"lens.l.google.com", "*.srv.nintendo.net",
-				"+.stun.playstation.net", "xbox.*.*.microsoft.com",
-				"*.*.xboxlive.com", "+.msftncsi.com", "+.msftconnecttest.com",
-			},
-		},
-Proxies:     make([]interface{}, 0),
-			ProxyGroups: make([]clashGroup, 0),
-			Rules:       buildClashRules(),
-		}
+	return generateClashByTemplate(nodes, user, appName, SettingSubscribeTemplateClash)
+}
 
-	// 构建代理
+// GenerateClashMeta 生成 Clash Meta 独立模板格式。
+func GenerateClashMeta(nodes []model.Node, user model.User, appName string) ([]byte, error) {
+	return generateClashByTemplate(nodes, user, appName, SettingSubscribeTemplateClashMeta)
+}
+
+// GenerateStash 生成 Stash 独立模板格式。
+func GenerateStash(nodes []model.Node, user model.User, appName string) ([]byte, error) {
+	return generateClashByTemplate(nodes, user, appName, SettingSubscribeTemplateStash)
+}
+
+func generateClashByTemplate(nodes []model.Node, user model.User, appName string, templateKey string) ([]byte, error) {
+	templateContent := GetSubscriptionTemplate(templateKey)
+	var cfg map[string]interface{}
+	if err := yaml.Unmarshal([]byte(templateContent), &cfg); err != nil {
+		return nil, err
+	}
+
+	proxies := make([]interface{}, 0)
 	nodeNames := make([]string, 0)
 
 	for _, node := range nodes {
@@ -151,25 +99,27 @@ Proxies:     make([]interface{}, 0),
 		}
 
 		if proxy != nil {
-			cfg.Proxies = append(cfg.Proxies, proxy)
+			proxies = append(proxies, proxy)
 			nodeNames = append(nodeNames, node.Name)
 		}
 	}
 
-	cfg = buildProxyGroups(cfg, nodeNames, appName)
+	cfg["proxies"] = proxies
+	if err := applyClashProxyGroups(cfg, nodeNames); err != nil {
+		return nil, err
+	}
 
 	data, err := yaml.Marshal(cfg)
 	if err != nil {
 		return nil, err
 	}
 
-	// 替换 $app_name 占位符（与 Xboard 一致）
 	groupName := appName
 	if groupName == "" {
-		groupName = "$app_name"
+		groupName = templateAppNamePlaceholder
 	}
-	yamlStr := strings.ReplaceAll(string(data), "$app_name", groupName)
-	return []byte(yamlStr), nil
+	output := strings.ReplaceAll(string(data), templateAppNamePlaceholder, groupName)
+	return []byte(output), nil
 }
 
 // buildClashRules 生成完整的 Clash 规则列表，使用 $app_name 占位符
@@ -393,7 +343,7 @@ func buildProxyGroups(cfg clashConfig, allNames []string, appName string) clashC
 	}
 
 	// 主选择分组名称（使用 $app_name 占位符，YAML 输出后替换为实际名称）
-	groupName := "$app_name"
+	groupName := templateAppNamePlaceholder
 
 	cfg.ProxyGroups = []clashGroup{
 		{
@@ -402,11 +352,11 @@ func buildProxyGroups(cfg clashConfig, allNames []string, appName string) clashC
 			Proxies: append([]string{"自动选择", "故障转移", "DIRECT"}, allNames...),
 		},
 		{
-			Name:     "自动选择",
-			Type:     "url-test",
-			Proxies:  allNames,
-			URL:      "http://www.gstatic.com/generate_204",
-			Interval: 300,
+			Name:      "自动选择",
+			Type:      "url-test",
+			Proxies:   allNames,
+			URL:       "http://www.gstatic.com/generate_204",
+			Interval:  300,
 			Tolerance: 50,
 		},
 		{
@@ -419,6 +369,55 @@ func buildProxyGroups(cfg clashConfig, allNames []string, appName string) clashC
 	}
 
 	return cfg
+}
+
+func applyClashProxyGroups(cfg map[string]interface{}, nodeNames []string) error {
+	groupsValue, ok := cfg["proxy-groups"]
+	if !ok {
+		return fmt.Errorf("Clash 模板缺少 proxy-groups 字段")
+	}
+
+	groups, ok := groupsValue.([]interface{})
+	if !ok {
+		return fmt.Errorf("Clash 模板的 proxy-groups 格式无效")
+	}
+
+	for _, item := range groups {
+		group, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		proxiesValue, ok := group["proxies"]
+		if !ok {
+			continue
+		}
+		proxies, ok := proxiesValue.([]interface{})
+		if !ok {
+			continue
+		}
+		group["proxies"] = replaceClashGroupPlaceholders(proxies, nodeNames)
+	}
+
+	return nil
+}
+
+func replaceClashGroupPlaceholders(proxies []interface{}, nodeNames []string) []interface{} {
+	result := make([]interface{}, 0, len(proxies)+len(nodeNames))
+	for _, item := range proxies {
+		name, ok := item.(string)
+		if !ok {
+			result = append(result, item)
+			continue
+		}
+		if name == clashAutoProxyPlaceholder {
+			for _, nodeName := range nodeNames {
+				result = append(result, nodeName)
+			}
+			continue
+		}
+		result = append(result, item)
+	}
+	return result
 }
 
 // buildClashVLESS 构建 VLESS 代理配置（Xboard 风格）
@@ -468,6 +467,9 @@ func buildClashVLESS(node model.Node, user model.User, p NodeParams) map[string]
 	if serverName != "" {
 		proxy["servername"] = serverName
 	}
+	if p.AllowInsecure {
+		proxy["skip-cert-verify"] = true
+	}
 
 	// Reality 配置
 	if security == "reality" && p.PublicKey != "" {
@@ -500,26 +502,34 @@ func buildClashHysteria2(node model.Node, user model.User, p NodeParams) map[str
 		"server":   node.Address,
 		"port":     node.Port,
 		"password": password,
-		"tls":      true,
 		"udp":      true,
 	}
 
-	if p.ServerName != "" {
-		proxy["sni"] = p.ServerName
+	sni := p.ServerName
+	if sni == "" {
+		sni = node.Address
+	}
+	if sni != "" {
+		proxy["sni"] = sni
+	}
+	if p.AllowInsecure {
+		proxy["skip-cert-verify"] = true
 	}
 
 	if p.UpMbps > 0 {
-		proxy["up"] = fmt.Sprintf("%d Mbps", p.UpMbps)
+		proxy["up"] = p.UpMbps
 	}
 	if p.DownMbps > 0 {
-		proxy["down"] = fmt.Sprintf("%d Mbps", p.DownMbps)
+		proxy["down"] = p.DownMbps
 	}
 
-	if p.ObfsPassword != "" {
-		proxy["obfs"] = map[string]interface{}{
-			"type":     "salamander",
-			"password": p.ObfsPassword,
+	if p.ObfsEnabled && p.ObfsPassword != "" {
+		obfsType := p.ObfsType
+		if obfsType == "" {
+			obfsType = "salamander"
 		}
+		proxy["obfs"] = obfsType
+		proxy["obfs-password"] = p.ObfsPassword
 	}
 
 	return proxy
@@ -549,8 +559,15 @@ func buildClashTUIC(node model.Node, user model.User, p NodeParams) map[string]i
 		"udp":                true,
 	}
 
-	if p.ServerName != "" {
-		proxy["sni"] = p.ServerName
+	sni := p.ServerName
+	if sni == "" {
+		sni = node.Address
+	}
+	if sni != "" {
+		proxy["sni"] = sni
+	}
+	if p.AllowInsecure {
+		proxy["skip-cert-verify"] = true
 	}
 
 	return proxy

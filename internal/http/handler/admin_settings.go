@@ -4,11 +4,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"nexus/internal/config"
 	"nexus/internal/database"
 	"nexus/internal/model"
+	"nexus/internal/subscription"
 
 	"github.com/gin-gonic/gin"
 )
@@ -22,7 +24,17 @@ func AdminGetSettings(c *gin.Context) {
 		settings[cfg.Key] = cfg.Value
 	}
 
+	for _, key := range subscription.SubscriptionTemplateKeys() {
+		if strings.TrimSpace(settings[key]) == "" {
+			settings[key] = subscription.GetDefaultSubscriptionTemplate(key)
+		}
+	}
+
 	Success(c, settings)
+}
+
+func AdminGetSubscriptionTemplateDefaults(c *gin.Context) {
+	Success(c, subscription.GetDefaultSubscriptionTemplates())
 }
 
 type updateSettingsRequest struct {
@@ -39,6 +51,17 @@ func AdminUpdateSettings(c *gin.Context) {
 	if len(req.Settings) == 0 {
 		BadRequest(c, "设置项不能为空")
 		return
+	}
+
+	for _, key := range subscription.SubscriptionTemplateKeys() {
+		value, ok := req.Settings[key]
+		if !ok {
+			continue
+		}
+		if err := subscription.ValidateSubscriptionTemplate(key, value); err != nil {
+			BadRequest(c, err.Error())
+			return
+		}
 	}
 
 	for key, value := range req.Settings {
